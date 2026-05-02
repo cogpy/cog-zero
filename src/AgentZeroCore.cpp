@@ -26,6 +26,10 @@
 #include "opencog/agentzero/TaskManager.h"
 #include "opencog/agentzero/KnowledgeIntegrator.h"
 #include "opencog/agentzero/ReasoningEngine.h"
+#include "opencog/agentzero/CognitiveLoop.h"
+#include "opencog/agentzero/TaskManager.h"
+#include "opencog/agentzero/KnowledgeIntegrator.h"
+#include "opencog/agentzero/ReasoningEngine.h"
 
 using namespace opencog;
 using namespace opencog::agentzero;
@@ -412,8 +416,8 @@ void AgentZeroCore::createAgentSelfRepresentation()
     _agent_self_atom = _atomspace->add_node(CONCEPT_NODE, std::string(_agent_name));
     
     // Set initial truth value to indicate agent exists and is active
-    TruthValuePtr agent_tv = SimpleTruthValue::createTV(1.0, 1.0);
-    _agent_self_atom->setTruthValue(agent_tv);
+    auto agent_tv = SimpleTruthValue::createTV(1.0, 1.0);
+    _agent_self_atom->setValue(truth_key(), agent_tv);
     
 // <<<<<<< copilot/fix-27
     logger().debug() << "[AgentZeroCore] Agent self-representation created: " << _agent_self_atom->to_short_string();

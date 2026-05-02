@@ -46,10 +46,10 @@ link_directories(
 )
 
 set(AGENTZERO_PERCEPTION_SOURCES
-    "${CMAKE_SOURCE_DIR}/src/PerceptualProcessor (2).cpp"
-    "${CMAKE_SOURCE_DIR}/src/MultiModalSensor (2).cpp"
-    "${CMAKE_SOURCE_DIR}/src/TextualSensor (2).cpp"
-    "${CMAKE_SOURCE_DIR}/src/AttentionManager (2).cpp"
+    ${CMAKE_SOURCE_DIR}/src/PerceptualProcessor.cpp
+    ${CMAKE_SOURCE_DIR}/src/MultiModalSensor.cpp
+    ${CMAKE_SOURCE_DIR}/src/TextualSensor.cpp
+    ${CMAKE_SOURCE_DIR}/src/AttentionManager.cpp
 )
 
 add_library(agentzero-perception SHARED ${AGENTZERO_PERCEPTION_SOURCES})

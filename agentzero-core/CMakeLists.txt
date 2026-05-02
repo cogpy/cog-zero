@@ -48,11 +48,11 @@ link_directories(
 
 set(AGENTZERO_CORE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/AgentZeroCore.cpp
-    "${CMAKE_SOURCE_DIR}/src/CognitiveLoop (2).cpp"
+    ${CMAKE_SOURCE_DIR}/src/CognitiveLoop.cpp
     ${CMAKE_SOURCE_DIR}/src/KnowledgeIntegrator.cpp
     ${CMAKE_SOURCE_DIR}/src/ReasoningEngine.cpp
-    "${CMAKE_SOURCE_DIR}/src/ActionExecutor (2).cpp"
-    "${CMAKE_SOURCE_DIR}/src/ActionScheduler (2).cpp"
+    ${CMAKE_SOURCE_DIR}/src/ActionExecutor.cpp
+    ${CMAKE_SOURCE_DIR}/src/ActionScheduler.cpp
     ${CMAKE_SOURCE_DIR}/src/MetaPlanner.cpp
     ${CMAKE_SOURCE_DIR}/src/SelfModification.cpp
 )
