@@ -9,6 +9,10 @@ project(AgentZeroCpp
     LANGUAGES CXX
 )
 
+# Add the cmake/ directory to CMake's module search path so that the
+# standard OpenCog cmake modules (Summary, AddCxxtest, etc.) are found.
+set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/")
+
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -206,6 +210,13 @@ if(BUILD_OPENCOG_MODULES)
     # Phase 10: Advanced Features - Distributed Computing (AZ-SCALE-001)
     add_subdirectory(agentzero-distributed)
 
+    # OpenCog integration layer — the opencog/ tree contains the library
+    # that is installed and consumed by other OpenCog projects.
+    add_subdirectory(opencog)
+
+    # pkg-config / CMake package files
+    add_subdirectory(lib)
+
     # Examples and tests (OpenCog modules)
     if(BUILD_EXAMPLES)
         add_subdirectory(examples)
@@ -233,25 +244,37 @@ endif()
 include(GNUInstallDirs)
 
 if(BUILD_OPENCOG_MODULES)
-    # Create package config file
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/AgentZeroCppConfig.cmake.in")
-        configure_file(
-            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/AgentZeroCppConfig.cmake.in"
-            "${CMAKE_CURRENT_BINARY_DIR}/AgentZeroCppConfig.cmake"
-            @ONLY
-        )
-
-        install(FILES
-            "${CMAKE_CURRENT_BINARY_DIR}/AgentZeroCppConfig.cmake"
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/AgentZeroCpp
-        )
+    # Set datadir for cmake scripts installation (mirrors cogutil convention)
+    if(NOT DEFINED DATADIR)
+        set(DATADIR "${CMAKE_INSTALL_PREFIX}/share/opencog")
     endif()
+    add_definitions(-DDATADIR="${DATADIR}")
 
-    # Export targets for installation (only when targets exist)
-    install(EXPORT AgentZeroCppTargets
-        FILE AgentZeroCppTargets.cmake
-        NAMESPACE AgentZero::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/AgentZeroCpp
+    # Generate the CogZero pkg-config / CMake config file
+    include(CMakePackageConfigHelpers)
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CogZeroConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/CogZeroConfig.cmake"
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CogZero
+        PATH_VARS CMAKE_INSTALL_PREFIX
+    )
+
+    install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/CogZeroConfig.cmake"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CogZero
+    )
+
+    # Export targets for installation
+    install(EXPORT CogZeroTargets
+        FILE CogZeroTargets.cmake
+        NAMESPACE CogZero::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CogZero
+    )
+
+    # Install the cmake modules so downstream packages can find them
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/cmake/
+        DESTINATION ${DATADIR}/cmake
+        FILES_MATCHING PATTERN "*.cmake"
     )
 endif()
 
