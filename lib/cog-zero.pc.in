@@ -1,0 +1,12 @@
+
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+includedir=${prefix}/include
+libdir=${exec_prefix}/lib@LIB_DIR_SUFFIX@/opencog
+
+Name: cog-zero
+Description: Agent-Zero C++ Implementation for OpenCog Integration
+Version: @PROJECT_VERSION@
+Requires: cogutil atomspace
+Cflags: -I${includedir}
+Libs: -L${libdir} -lcog0
