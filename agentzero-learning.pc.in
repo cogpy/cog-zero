@@ -1,0 +1,11 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: agentzero-learning
+Description: Agent-Zero Learning & Adaptation Module with ASMOSES Integration
+Version: @PROJECT_VERSION@
+Requires: cogutil atomspace
+Libs: -L${libdir} -lagentzero-learning
+Cflags: -I${includedir}

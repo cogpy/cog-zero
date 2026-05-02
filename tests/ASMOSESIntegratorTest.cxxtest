@@ -1,0 +1,103 @@
+/**
+ * ASMOSESIntegratorTest.cxxtest
+ *
+ * Unit tests for ASMOSESIntegrator
+ * Part of Agent-Zero Learning & Adaptation Phase 5
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ */
+
+#include <cxxtest/TestSuite.h>
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/atom_types/atom_types.h>
+#include <opencog/util/Logger.h>
+
+#include "agentzero-learning/ASMOSESIntegrator.h"
+
+using namespace opencog;
+using namespace opencog::agentzero;
+
+class ASMOSESIntegratorTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr _atomspace;
+    std::unique_ptr<ASMOSESIntegrator> _integrator;
+
+public:
+    void setUp()
+    {
+        logger().set_level(Logger::DEBUG);
+        logger().set_print_to_stdout_flag(true);
+        
+        _atomspace = std::make_shared<AtomSpace>();
+        _integrator = std::make_unique<ASMOSESIntegrator>(_atomspace, "test-agent");
+    }
+
+    void tearDown()
+    {
+        _integrator.reset();
+        _atomspace.reset();
+    }
+
+    void test_initialization()
+    {
+        TS_ASSERT(!_integrator->isInitialized());
+        TS_ASSERT(_integrator->initialize());
+        TS_ASSERT(_integrator->isInitialized());
+    }
+
+    void test_evolution_params()
+    {
+        TS_ASSERT(_integrator->initialize());
+        
+        std::map<std::string, std::string> params;
+        params["max_generations"] = "50";
+        params["population_size"] = "100";
+        
+        _integrator->setEvolutionParams(params);
+        
+        auto retrieved_params = _integrator->getEvolutionParams();
+        TS_ASSERT_EQUALS(retrieved_params["max_generations"], "50");
+        TS_ASSERT_EQUALS(retrieved_params["population_size"], "100");
+    }
+
+    void test_evolve_program()
+    {
+        TS_ASSERT(_integrator->initialize());
+        
+        // Create a simple problem atom
+        Handle problem = _atomspace->add_node(CONCEPT_NODE, "test_problem");
+        
+        // Simple fitness function
+        auto fitness_fn = [](const Handle& program) -> double {
+            return 0.5; // Simple constant fitness
+        };
+        
+        Handle result = _integrator->evolveProgram(problem, fitness_fn, 10);
+        
+        // Should return some result (even if simple)
+        TS_ASSERT(result != Handle::UNDEFINED);
+    }
+
+    void test_statistics()
+    {
+        TS_ASSERT(_integrator->initialize());
+        
+        auto stats = _integrator->getStatistics();
+        TS_ASSERT(stats["initializations"] >= 1);
+        
+        _integrator->resetStatistics();
+        stats = _integrator->getStatistics();
+        TS_ASSERT(stats.empty());
+    }
+
+    void test_components_access()
+    {
+        TS_ASSERT(_integrator->initialize());
+        
+        TS_ASSERT(_integrator->getEvolver() != nullptr);
+        TS_ASSERT(_integrator->getExperienceManager() != nullptr);
+        TS_ASSERT(_integrator->getPolicyOptimizer() != nullptr);
+    }
+};

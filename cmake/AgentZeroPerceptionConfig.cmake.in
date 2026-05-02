@@ -1,0 +1,16 @@
+set(AGENTZERO_PERCEPTION_VERSION @PROJECT_VERSION@)
+
+# Include directories  
+set(AGENTZERO_PERCEPTION_INCLUDE_DIR "@CMAKE_INSTALL_PREFIX@/include")
+
+# Libraries
+set(AGENTZERO_PERCEPTION_LIBRARY "@CMAKE_INSTALL_PREFIX@/lib/opencog/libagentzero-perception.so")
+
+# Dependencies
+find_package(CogUtil REQUIRED)
+find_package(AtomSpace REQUIRED)
+
+# Mark as found
+set(AGENTZERO_PERCEPTION_FOUND TRUE)
+
+message(STATUS "Found AgentZero Perception: ${AGENTZERO_PERCEPTION_LIBRARY}")

@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.os }}, ${{ matrix.compiler }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux — GCC
+          - os: ubuntu-22.04
+            compiler: gcc
+            cc: gcc
+            cxx: g++
+          # Linux — Clang
+          - os: ubuntu-22.04
+            compiler: clang
+            cc: clang
+            cxx: clang++
+          # Linux — GCC (newer)
+          - os: ubuntu-24.04
+            compiler: gcc
+            cc: gcc
+            cxx: g++
+          # Linux — Clang (newer)
+          - os: ubuntu-24.04
+            compiler: clang
+            cc: clang
+            cxx: clang++
+          # Windows — MSVC (cl)
+          - os: windows-latest
+            compiler: cl
+            cc: cl
+            cxx: cl
+          # macOS 14 (arm64) — AppleClang
+          - os: macos-14
+            compiler: appleclang
+            cc: clang
+            cxx: clang++
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            ${{ matrix.compiler == 'clang' && 'clang' || 'g++' }}
+
+      - name: Set up MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Cache build directory
+        uses: actions/cache@v4
+        with:
+          path: standalone/build
+          key: build-${{ matrix.os }}-${{ matrix.compiler }}-${{ hashFiles('standalone/**') }}
+          restore-keys: |
+            build-${{ matrix.os }}-${{ matrix.compiler }}-
+
+      - name: Configure
+        shell: bash
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -S standalone -B standalone/build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON
+
+      - name: Build
+        shell: bash
+        run: cmake --build standalone/build --parallel
+
+      - name: Unit Tests
+        shell: bash
+        working-directory: standalone/build
+        run: |
+          ctest --output-on-failure \
+                --parallel $(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 2) \
+                --label-regex "^unit$"
+
+      - name: E2E & Integration Tests
+        shell: bash
+        working-directory: standalone/build
+        run: |
+          ctest --output-on-failure \
+                --parallel $(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 2) \
+                --label-regex "^(e2e|integration)$"
+
+      - name: Benchmarks
+        shell: bash
+        working-directory: standalone/build
+        run: |
+          ctest --output-on-failure \
+                --label-regex "^benchmark$"
+
+  sanitizers:
+    name: Sanitizers (ASan + UBSan)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends cmake ninja-build clang
+
+      - name: Configure (ASan + UBSan)
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S standalone -B standalone/build-san \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build standalone/build-san --parallel
+
+      - name: Run tests under sanitizers
+        working-directory: standalone/build-san
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          ctest --output-on-failure \
+                --parallel $(nproc) \
+                --label-regex "^(unit|e2e|integration)$"

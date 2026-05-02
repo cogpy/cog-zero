@@ -1,0 +1,483 @@
+name: Create Roadmap Issues
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'ROADMAP.md'
+      - '.github/workflows/create-roadmap-issues.yml'
+
+permissions:
+  issues: write
+
+jobs:
+  create-issues:
+    name: Create Roadmap Feature Issues
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Phase 1 — Foundation & Orchestration
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'enhancement'
+            });
+            const title = 'Phase 1 — Foundation & Orchestration (agentzero-core)';
+            if (existing.data.some(i => i.title === title)) {
+              console.log('Issue already exists, skipping.');
+              return;
+            }
+            const body1 = [
+              '## Phase 1 — Foundation & Orchestration 🚧 In Progress',
+              '',
+              '**Module:** `agentzero-core/`',
+              '**Dependencies:** cogutil, atomspace, cogserver',
+              '',
+              '### Goals',
+              '- Deep AtomSpace integration for all agent state',
+              '- CogServer module registration',
+              '- Full cognitive loop with OpenCog types',
+              '',
+              '### Tasks',
+              '- [ ] `AgentZeroCore` — main orchestration class backed by AtomSpace',
+              '- [ ] `CognitiveLoop` — perception-action-reflection with AtomSpace handles',
+              '- [ ] `TaskManager` — goal/task management using EvaluationLinks and StateLinks',
+              '- [ ] `KnowledgeIntegrator` — AtomSpace bridge (semantic search, pattern mining)',
+              '- [ ] `ActionExecutor` — action execution framework with status tracking',
+              '- [ ] `ActionScheduler` — temporal action coordination',
+              '- [ ] `MetaPlanner` — self-reflective planning optimisation',
+              '- [ ] `ReasoningEngine` — PLN/URE integration with uncertainty via TruthValues',
+              '- [ ] `SelfModification` — safe code-analysis and rollback framework',
+              '',
+              '### Acceptance Criteria',
+              '- All `agentzero-core/tests/` pass under CTest',
+              '- Agent registers with CogServer and responds to module commands',
+              '- AtomSpace holds full agent state (goals, tasks, percepts, conclusions)',
+              '',
+              '---',
+              '*Tracked in [ROADMAP.md](https://github.com/ReZorg/cog0/blob/main/ROADMAP.md)*',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['enhancement'],
+              body: body1,
+            });
+
+      - name: Phase 2 — Perception & Sensory Processing
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'enhancement'
+            });
+            const title = 'Phase 2 — Perception & Sensory Processing (agentzero-perception)';
+            if (existing.data.some(i => i.title === title)) {
+              console.log('Issue already exists, skipping.');
+              return;
+            }
+            const body2 = [
+              '## Phase 2 — Perception & Sensory Processing 📅 Planned',
+              '',
+              '**Module:** `agentzero-perception/`',
+              '**Dependencies:** sensory, vision, perception',
+              '',
+              '### Tasks',
+              '- [ ] `MultiModalSensor` — unified interface for text, numeric, event, and visual inputs',
+              '- [ ] `PerceptualProcessor` — converts raw inputs into AtomSpace representations',
+              '- [ ] `AttentionManager` — ECAN-based attention allocation for incoming percepts',
+              '- [ ] `TextualSensor` — streaming text ingestion with salience scoring',
+              '',
+              '---',
+              '*Tracked in [ROADMAP.md](https://github.com/ReZorg/cog0/blob/main/ROADMAP.md)*',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['enhancement'],
+              body: body2,
+            });
+
+      - name: Phase 3 — Knowledge Representation & Reasoning
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'enhancement'
+            });
+            const title = 'Phase 3 — Knowledge Representation & Reasoning (agentzero-knowledge)';
+            if (existing.data.some(i => i.title === title)) {
+              console.log('Issue already exists, skipping.');
+              return;
+            }
+            const body3 = [
+              '## Phase 3 — Knowledge Representation & Reasoning 📅 Planned',
+              '',
+              '**Module:** *(agentzero-knowledge — to be extracted from core)*',
+              '**Dependencies:** atomspace, pln, ure, miner',
+              '',
+              '### Tasks',
+              '- [ ] `KnowledgeBase` — extended AtomSpace operations (bulk load, SPARQL-like queries)',
+              '- [ ] `PatternDiscovery` — unsupervised pattern mining over episode history',
+              '- [ ] `ConceptFormation` — automatic concept creation and refinement',
+              '- [ ] PLN rule library for common agent-reasoning patterns',
+              '',
+              '---',
+              '*Tracked in [ROADMAP.md](https://github.com/ReZorg/cog0/blob/main/ROADMAP.md)*',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['enhancement'],
+              body: body3,
+            });
+
+      - name: Phase 4 — Hierarchical Planning & Goal Management
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'enhancement'
+            });
+            const title = 'Phase 4 — Hierarchical Planning & Goal Management (agentzero-planning)';
+            if (existing.data.some(i => i.title === title)) {
+              console.log('Issue already exists, skipping.');
+              return;
+            }
+            const body4 = [
+              '## Phase 4 — Hierarchical Planning & Goal Management 📅 Planned',
+              '',
+              '**Module:** `agentzero-planning/`',
+              '**Dependencies:** spacetime, cogserver',
+              '',
+              '### Tasks',
+              '- [ ] `GoalHierarchy` — goal tree with dependency tracking',
+              '- [ ] `PlanningEngine` — STRIPS/HTN plan generation and execution',
+              '- [ ] Temporal planning via SpaceTime module',
+              '- [ ] `MetaPlanner` enhancements — plan quality metrics and self-optimisation',
+              '',
+              '---',
+              '*Tracked in [ROADMAP.md](https://github.com/ReZorg/cog0/blob/main/ROADMAP.md)*',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['enhancement'],
+              body: body4,
+            });
+
+      - name: Phase 5 — Continuous Learning & Adaptation
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'enhancement'
+            });
+            const title = 'Phase 5 — Continuous Learning & Adaptation (agentzero-learning)';
+            if (existing.data.some(i => i.title === title)) {
+              console.log('Issue already exists, skipping.');
+              return;
+            }
+            const body5 = [
+              '## Phase 5 — Continuous Learning & Adaptation 📅 Planned',
+              '',
+              '**Module:** `agentzero-learning/`',
+              '**Dependencies:** moses, asmoses, learn',
+              '',
+              '### Tasks',
+              '- [ ] `ExperienceManager` — episodic memory for agent trajectories',
+              '- [ ] `SkillAcquisition` — learn reusable skills from experience',
+              '- [ ] `PolicyOptimizer` — MOSES-based policy evolution',
+              '- [ ] `MetaLearning` — learning-to-learn improvements',
+              '',
+              '---',
+              '*Tracked in [ROADMAP.md](https://github.com/ReZorg/cog0/blob/main/ROADMAP.md)*',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['enhancement'],
+              body: body5,
+            });
+
+      - name: Phase 6 — Communication & NLP
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'enhancement'
+            });
+            const title = 'Phase 6 — Communication & NLP (agentzero-communication)';
+            if (existing.data.some(i => i.title === title)) {
+              console.log('Issue already exists, skipping.');
+              return;
+            }
+            const body6 = [
+              '## Phase 6 — Communication & NLP 📅 Planned',
+              '',
+              '**Module:** `agentzero-communication/`',
+              '**Dependencies:** lg-atomese, opencog NLP',
+              '',
+              '### Tasks',
+              '- [ ] `LanguageProcessor` — NLU/NLG with Link Grammar',
+              '- [ ] `DialogueManager` — multi-turn conversation management',
+              '- [ ] `AgentComms` — inter-agent messaging protocol',
+              '- [ ] `HumanInterface` — user-facing dialogue layer',
+              '',
+              '---',
+              '*Tracked in [ROADMAP.md](https://github.com/ReZorg/cog0/blob/main/ROADMAP.md)*',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['enhancement'],
+              body: body6,
+            });
+
+      - name: Phase 7 — Memory & Context Management
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'enhancement'
+            });
+            const title = 'Phase 7 — Memory & Context Management (agentzero-memory)';
+            if (existing.data.some(i => i.title === title)) {
+              console.log('Issue already exists, skipping.');
+              return;
+            }
+            const body7 = [
+              '## Phase 7 — Memory & Context Management 📅 Planned',
+              '',
+              '**Module:** `agentzero-memory/`',
+              '**Dependencies:** atomspace-rocks, attention',
+              '',
+              '### Tasks',
+              '- [ ] `EpisodicMemory` — temporal sequence storage and retrieval',
+              '- [ ] `WorkingMemory` — active context window',
+              '- [ ] `LongTermMemory` — persistent storage via AtomSpace-RocksDB backend',
+              '- [ ] `ContextManager` — context-aware atom retrieval and relevance scoring',
+              '',
+              '---',
+              '*Tracked in [ROADMAP.md](https://github.com/ReZorg/cog0/blob/main/ROADMAP.md)*',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['enhancement'],
+              body: body7,
+            });
+
+      - name: Phase 8 — External Tool Integration
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'enhancement'
+            });
+            const title = 'Phase 8 — External Tool Integration (agentzero-tools)';
+            if (existing.data.some(i => i.title === title)) {
+              console.log('Issue already exists, skipping.');
+              return;
+            }
+            const body8 = [
+              '## Phase 8 — External Tool Integration 📅 Planned',
+              '',
+              '**Module:** `agentzero-tools/`',
+              '**Dependencies:** external-tools, ros-behavior-scripting',
+              '',
+              '### Tasks',
+              '- [ ] `ToolRegistry` — dynamic tool discovery and capability catalogue',
+              '- [ ] `ToolExecutor` — sandboxed tool invocation with result normalisation',
+              '- [ ] REST API tool adapter',
+              '- [ ] ROS behaviour scripting bridge',
+              '',
+              '---',
+              '*Tracked in [ROADMAP.md](https://github.com/ReZorg/cog0/blob/main/ROADMAP.md)*',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['enhancement'],
+              body: body8,
+            });
+
+      - name: Phase 9 — Integration & End-to-End Testing
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'enhancement'
+            });
+            const title = 'Phase 9 — Integration & End-to-End Testing';
+            if (existing.data.some(i => i.title === title)) {
+              console.log('Issue already exists, skipping.');
+              return;
+            }
+            const body9 = [
+              '## Phase 9 — Integration & End-to-End Testing 📅 Planned',
+              '',
+              '### Tasks',
+              '- [ ] Full system integration tests (all modules together)',
+              '- [ ] Performance benchmarks vs. baseline (< 100 ms routine decisions)',
+              '- [ ] Regression baseline establishment',
+              '- [ ] Python interoperability bridge (`agentzero-python-bridge/`) — Cython bindings',
+              '- [ ] Documentation pass: API reference, deployment guide',
+              '',
+              '---',
+              '*Tracked in [ROADMAP.md](https://github.com/ReZorg/cog0/blob/main/ROADMAP.md)*',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['enhancement'],
+              body: body9,
+            });
+
+      - name: Phase 10 — Distributed Computing & Advanced Features
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'enhancement'
+            });
+            const title = 'Phase 10 — Distributed Computing & Advanced Features (agentzero-distributed)';
+            if (existing.data.some(i => i.title === title)) {
+              console.log('Issue already exists, skipping.');
+              return;
+            }
+            const body10 = [
+              '## Phase 10 — Distributed Computing & Advanced Features 📅 Planned',
+              '',
+              '**Module:** `agentzero-distributed/`',
+              '',
+              '### Tasks',
+              '- [ ] `ClusterManager` — multi-node agent cluster coordination',
+              '- [ ] `DistributedCoordinator` — consistent agent state across nodes',
+              '- [ ] `LoadBalancer` — cognitive load distribution',
+              '- [ ] Multi-agent coordination protocols',
+              '',
+              '---',
+              '*Tracked in [ROADMAP.md](https://github.com/ReZorg/cog0/blob/main/ROADMAP.md)*',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['enhancement'],
+              body: body10,
+            });
+
+      - name: Near-Term Enhancements — Standalone CLI
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'enhancement'
+            });
+            const title = 'Near-Term Enhancements — Standalone CLI (standalone/)';
+            if (existing.data.some(i => i.title === title)) {
+              console.log('Issue already exists, skipping.');
+              return;
+            }
+            const bodyCli = [
+              '## Near-Term Enhancements — Standalone CLI',
+              '',
+              '**Module:** `standalone/`',
+              '',
+              '### Tasks',
+              '- [ ] `--batch` mode: execute a script and emit JSON status for programmatic use',
+              '- [ ] `save <file>` / `load <file>` commands: persist and restore AtomStore snapshots',
+              '- [ ] `rule <name> <condition> <action>` command: register inference rules interactively',
+              '- [ ] Tab-completion for interactive REPL (via `readline` / `libedit` optional dep)',
+              '- [ ] Colour output toggle (`--no-color`)',
+              '',
+              '---',
+              '*Tracked in [ROADMAP.md](https://github.com/ReZorg/cog0/blob/main/ROADMAP.md)*',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['enhancement'],
+              body: bodyCli,
+            });
+
+      - name: Near-Term Enhancements — Testing
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'enhancement'
+            });
+            const title = 'Near-Term Enhancements — Testing';
+            if (existing.data.some(i => i.title === title)) {
+              console.log('Issue already exists, skipping.');
+              return;
+            }
+            const bodyTesting = [
+              '## Near-Term Enhancements — Testing',
+              '',
+              '### Tasks',
+              '- [ ] Property-based (fuzz) tests for AtomStore and ReasoningEngine',
+              '- [ ] Benchmark suite integrated into `ctest -R benchmark`',
+              '- [ ] CI workflow that builds and tests the standalone module on Linux + macOS',
+              '',
+              '---',
+              '*Tracked in [ROADMAP.md](https://github.com/ReZorg/cog0/blob/main/ROADMAP.md)*',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['enhancement'],
+              body: bodyTesting,
+            });

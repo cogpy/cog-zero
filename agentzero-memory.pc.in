@@ -1,0 +1,11 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: agentzero-memory
+Description: Agent-Zero Memory & Context Management Module
+Version: @PROJECT_VERSION@
+Requires: cogutil atomspace atomspace-rocks attention
+Libs: -L${libdir} -lagentzero-memory
+Cflags: -I${includedir}

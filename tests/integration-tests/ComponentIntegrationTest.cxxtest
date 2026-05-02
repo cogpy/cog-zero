@@ -1,0 +1,436 @@
+/*
+ * tests/integration-tests/ComponentIntegrationTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Comprehensive Integration Tests for Agent-Zero Components
+ * Tests cross-component interactions and data flow
+ * Part of AZ-INT-001: Create comprehensive integration tests
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <memory>
+#include <vector>
+#include <chrono>
+
+#include "../framework/TestFramework.h"
+#include "../mocks/MockObjects.h"
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/base/Link.h>
+#include <opencog/atoms/atom_types/types.h>
+#include <opencog/util/Logger.h>
+
+using namespace opencog;
+using namespace opencog::agentzero;
+using namespace opencog::agentzero::test;
+using namespace opencog::agentzero::test::mocks;
+
+/**
+ * Component Integration Test Suite
+ * Tests interactions between Agent-Zero components
+ */
+class ComponentIntegrationTest : public IntegrationTestFramework
+{
+private:
+    std::unique_ptr<MockAgentZeroCore> _agent_core;
+    std::unique_ptr<MockCognitiveLoop> _cognitive_loop;
+    std::unique_ptr<MockTaskManager> _task_manager;
+    std::unique_ptr<MockKnowledgeIntegrator> _knowledge_integrator;
+
+public:
+    void setUp() override
+    {
+        IntegrationTestFramework::setUp();
+        
+        // Create mock components
+        _agent_core = std::make_unique<MockAgentZeroCore>("IntegrationTestAgent");
+        _agent_core->setAtomSpace(getTestAtomSpace());
+        _agent_core->init();
+        
+        _cognitive_loop = std::make_unique<MockCognitiveLoop>(getTestAtomSpace());
+        _task_manager = std::make_unique<MockTaskManager>(getTestAtomSpace());
+        _knowledge_integrator = std::make_unique<MockKnowledgeIntegrator>(getTestAtomSpace());
+        
+        logger().set_level(Logger::INFO);
+    }
+
+    void tearDown() override
+    {
+        _knowledge_integrator.reset();
+        _task_manager.reset();
+        _cognitive_loop.reset();
+        _agent_core.reset();
+        
+        IntegrationTestFramework::tearDown();
+    }
+
+    /**
+     * Test 1: Agent Core and Cognitive Loop Integration
+     * Verifies that the agent core can properly coordinate with the cognitive loop
+     */
+    void test_AgentCore_CognitiveLoop_Integration()
+    {
+        startTestTimer("agent_cognitive_integration");
+        
+        // Start the agent
+        TS_ASSERT(_agent_core->start());
+        TS_ASSERT(_agent_core->isRunning());
+        
+        // Execute cognitive cycles
+        for (int i = 0; i < 5; ++i) {
+            TS_ASSERT(_agent_core->processCognitiveStep());
+        }
+        
+        // Verify cognitive processing occurred
+        TS_ASSERT_EQUALS(_agent_core->getCognitiveStepsExecuted(), 5);
+        
+        // Stop the agent
+        TS_ASSERT(_agent_core->stop());
+        TS_ASSERT(!_agent_core->isRunning());
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+    }
+
+    /**
+     * Test 2: Task Manager and Knowledge Integrator Coordination
+     * Tests how task management interacts with knowledge integration
+     */
+    void test_TaskManager_KnowledgeIntegrator_Coordination()
+    {
+        startTestTimer("task_knowledge_coordination");
+        
+        // Create a test goal
+        Handle goal_atom = createTestAtom(CONCEPT_NODE, "TestGoal_LearnNewConcept");
+        
+        // Set goal in task manager
+        TS_ASSERT(_task_manager->addTask(goal_atom, 1.0));
+        TS_ASSERT_EQUALS(_task_manager->getActiveTaskCount(), 1);
+        
+        // Process task and extract knowledge
+        Handle task_result = _task_manager->executeNextTask();
+        TS_ASSERT(task_result != Handle::UNDEFINED);
+        
+        // Integrate knowledge from task execution
+        TS_ASSERT(_knowledge_integrator->integrateKnowledge(task_result));
+        
+        // Verify knowledge was added to AtomSpace
+        TS_ASSERT(getAtomSpaceSize() > 1);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 3: Cognitive Loop Multi-Phase Integration
+     * Tests all phases of the cognitive loop working together
+     */
+    void test_CognitiveLoop_MultiPhase_Integration()
+    {
+        startTestTimer("cognitive_multiphase");
+        
+        // Configure all cognitive phases
+        _cognitive_loop->configurePhases(true, true, true, true);
+        
+        // Start cognitive loop
+        TS_ASSERT(_cognitive_loop->start());
+        TS_ASSERT(_cognitive_loop->isRunning());
+        
+        // Execute multiple cycles
+        TS_ASSERT(_cognitive_loop->executeMultipleCycles(10));
+        TS_ASSERT_EQUALS(_cognitive_loop->getCycleCount(), 10);
+        
+        // Verify all phases were executed
+        const auto& executed_phases = _cognitive_loop->getExecutedPhases();
+        TS_ASSERT(!executed_phases.empty());
+        
+        // Check for key phase names
+        bool has_perception = false;
+        bool has_reasoning = false;
+        bool has_planning = false;
+        bool has_action = false;
+        
+        for (const auto& phase : executed_phases) {
+            if (phase.find("perception") != std::string::npos) has_perception = true;
+            if (phase.find("reasoning") != std::string::npos) has_reasoning = true;
+            if (phase.find("planning") != std::string::npos) has_planning = true;
+            if (phase.find("action") != std::string::npos) has_action = true;
+        }
+        
+        TS_ASSERT(has_perception);
+        TS_ASSERT(has_reasoning);
+        TS_ASSERT(has_planning);
+        TS_ASSERT(has_action);
+        
+        // Stop loop
+        TS_ASSERT(_cognitive_loop->stop());
+        TS_ASSERT(!_cognitive_loop->isRunning());
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 4: Goal Hierarchy and Task Decomposition
+     * Tests hierarchical goal decomposition across components
+     */
+    void test_GoalHierarchy_TaskDecomposition_Integration()
+    {
+        startTestTimer("goal_hierarchy_decomposition");
+        
+        // Create a high-level goal
+        Handle main_goal = createTestAtom(CONCEPT_NODE, "MainGoal_SolveComplexProblem");
+        
+        // Add main goal to task manager
+        TS_ASSERT(_task_manager->addTask(main_goal, 1.0));
+        
+        // Decompose into sub-goals (this should create more tasks)
+        std::vector<Handle> sub_goals = _task_manager->decomposeTask(main_goal);
+        TS_ASSERT(!sub_goals.empty());
+        TS_ASSERT(sub_goals.size() >= 2);
+        
+        // Each sub-goal should be in the task queue
+        for (const auto& sub_goal : sub_goals) {
+            TS_ASSERT(sub_goal != Handle::UNDEFINED);
+            TS_ASSERT(getTestAtomSpace()->is_valid_handle(sub_goal));
+        }
+        
+        // Verify task hierarchy in AtomSpace
+        TS_ASSERT(getAtomSpaceSize() >= 3); // main goal + at least 2 sub-goals
+        
+        // Execute one sub-task
+        Handle executed_task = _task_manager->executeNextTask();
+        TS_ASSERT(executed_task != Handle::UNDEFINED);
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+    }
+
+    /**
+     * Test 5: Knowledge Integration with Reasoning
+     * Tests how knowledge integrator feeds reasoning engine
+     */
+    void test_KnowledgeIntegration_Reasoning_Flow()
+    {
+        startTestTimer("knowledge_reasoning_flow");
+        
+        // Create initial knowledge atoms
+        Handle concept_a = createTestAtom(CONCEPT_NODE, "ConceptA");
+        Handle concept_b = createTestAtom(CONCEPT_NODE, "ConceptB");
+        
+        // Create a relationship
+        HandleSeq relationship_outgoing = {concept_a, concept_b};
+        Handle relationship = getTestAtomSpace()->add_link(INHERITANCE_LINK, relationship_outgoing);
+        
+        // Integrate this knowledge
+        TS_ASSERT(_knowledge_integrator->integrateKnowledge(relationship));
+        
+        // Query knowledge base
+        HandleSeq query_results = _knowledge_integrator->queryKnowledge(concept_a);
+        TS_ASSERT(!query_results.empty());
+        
+        // Verify relationship was found
+        bool found_relationship = false;
+        for (const auto& result : query_results) {
+            if (result == relationship) {
+                found_relationship = true;
+                break;
+            }
+        }
+        TS_ASSERT(found_relationship);
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 6: Complete Agent Lifecycle Integration
+     * Tests full initialization, operation, and shutdown sequence
+     */
+    void test_Complete_Agent_Lifecycle()
+    {
+        startTestTimer("complete_lifecycle");
+        
+        // 1. Initialization phase
+        TS_ASSERT(_agent_core->isInitialized());
+        Handle agent_self = _agent_core->getAgentSelfAtom();
+        // Agent self atom may or may not be defined depending on initialization
+        
+        // 2. Configuration phase
+        TS_ASSERT(_agent_core->config("enable_cognitive_loop=true"));
+        TS_ASSERT(_agent_core->config("enable_reasoning=true"));
+        
+        // 3. Start phase
+        TS_ASSERT(_agent_core->start());
+        
+        // 4. Operation phase - set a goal and process
+        Handle test_goal = createTestAtom(CONCEPT_NODE, "LifecycleTestGoal");
+        TS_ASSERT(_agent_core->setGoal(test_goal));
+        TS_ASSERT_EQUALS(_agent_core->getCurrentGoal(), test_goal);
+        
+        // Process several cognitive steps
+        for (int i = 0; i < 3; ++i) {
+            TS_ASSERT(_agent_core->processCognitiveStep());
+        }
+        
+        // 5. Shutdown phase
+        TS_ASSERT(_agent_core->stop());
+        TS_ASSERT(!_agent_core->isRunning());
+        
+        // 6. Verify clean state
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 7: Multi-Agent Coordination (if supported)
+     * Tests multiple agents coordinating through shared AtomSpace
+     */
+    void test_MultiAgent_Coordination()
+    {
+        startTestTimer("multiagent_coordination");
+        
+        // Create second agent sharing the same AtomSpace
+        auto agent2 = std::make_unique<MockAgentZeroCore>("SecondAgent");
+        agent2->setAtomSpace(getTestAtomSpace());
+        agent2->init();
+        
+        // Both agents start
+        TS_ASSERT(_agent_core->start());
+        TS_ASSERT(agent2->start());
+        
+        // Agent 1 creates a goal
+        Handle shared_goal = createTestAtom(CONCEPT_NODE, "SharedGoal");
+        _agent_core->setGoal(shared_goal);
+        
+        // Agent 2 should be able to see this goal in shared AtomSpace
+        TS_ASSERT(getTestAtomSpace()->is_valid_handle(shared_goal));
+        
+        // Both agents process
+        _agent_core->processCognitiveStep();
+        agent2->processCognitiveStep();
+        
+        // Verify both made progress
+        TS_ASSERT(_agent_core->getCognitiveStepsExecuted() > 0);
+        TS_ASSERT(agent2->getCognitiveStepsExecuted() > 0);
+        
+        // Cleanup
+        agent2->stop();
+        agent2.reset();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+    }
+
+    /**
+     * Test 8: Error Recovery and Resilience
+     * Tests component behavior under error conditions
+     */
+    void test_Error_Recovery_Resilience()
+    {
+        startTestTimer("error_recovery");
+        
+        // Test invalid goal handling
+        Handle invalid_goal = Handle::UNDEFINED;
+        TS_ASSERT(!_task_manager->addTask(invalid_goal, 1.0));
+        
+        // Agent should remain stable
+        TS_ASSERT(_agent_core->start());
+        
+        // Test recovery from empty task queue
+        clearAtomSpace();
+        Handle result = _task_manager->executeNextTask();
+        // Should handle gracefully (return undefined or valid empty result)
+        
+        // Agent should still be operational
+        TS_ASSERT(_agent_core->isRunning());
+        TS_ASSERT(_agent_core->processCognitiveStep());
+        
+        _agent_core->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 9: Performance Under Load
+     * Tests component integration with realistic workloads
+     */
+    void test_Performance_Under_Load()
+    {
+        startTestTimer("performance_under_load");
+        
+        _agent_core->start();
+        
+        // Create multiple goals
+        std::vector<Handle> goals;
+        for (int i = 0; i < 50; ++i) {
+            Handle goal = createTestAtom(CONCEPT_NODE, "LoadTestGoal_" + std::to_string(i));
+            goals.push_back(goal);
+            _task_manager->addTask(goal, 1.0);
+        }
+        
+        // Process many cognitive steps
+        for (int i = 0; i < 100; ++i) {
+            _agent_core->processCognitiveStep();
+        }
+        
+        // Verify system remained stable
+        TS_ASSERT(_agent_core->isRunning());
+        TS_ASSERT(_agent_core->getCognitiveStepsExecuted() == 100);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        _agent_core->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 10: State Persistence and Recovery
+     * Tests that agent state can be preserved and restored
+     */
+    void test_State_Persistence_Recovery()
+    {
+        startTestTimer("state_persistence");
+        
+        // Setup initial state
+        _agent_core->start();
+        Handle goal1 = createTestAtom(CONCEPT_NODE, "PersistentGoal");
+        _agent_core->setGoal(goal1);
+        _agent_core->processCognitiveStep();
+        _agent_core->processCognitiveStep();
+        
+        int steps_before = _agent_core->getCognitiveStepsExecuted();
+        Handle goal_before = _agent_core->getCurrentGoal();
+        
+        // Simulate persistence (AtomSpace preserves state)
+        size_t atoms_before = getAtomSpaceSize();
+        
+        // Stop and restart agent
+        _agent_core->stop();
+        _agent_core->reset();
+        _agent_core->init();
+        _agent_core->start();
+        
+        // Verify state recovery (AtomSpace should still have atoms)
+        size_t atoms_after = getAtomSpaceSize();
+        TS_ASSERT_EQUALS(atoms_after, atoms_before);
+        TS_ASSERT(getTestAtomSpace()->is_valid_handle(goal_before));
+        
+        _agent_core->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+    }
+};

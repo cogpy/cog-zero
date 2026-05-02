@@ -1,0 +1,579 @@
+/*
+ * tests/integration-tests/CogServerIntegrationTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Comprehensive CogServer Integration Tests
+ * Tests Agent-Zero integration with OpenCog CogServer
+ * Part of AZ-INT-001: Create comprehensive integration tests
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "../framework/TestFramework.h"
+#include "../mocks/MockObjects.h"
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/base/Link.h>
+#include <opencog/atoms/atom_types/types.h>
+#include <opencog/cogserver/server/CogServer.h>
+#include <opencog/util/Logger.h>
+
+using namespace opencog;
+using namespace opencog::agentzero;
+using namespace opencog::agentzero::test;
+using namespace opencog::agentzero::test::mocks;
+
+/**
+ * CogServer Integration Test Suite
+ * Tests Agent-Zero integration with CogServer infrastructure
+ */
+class CogServerIntegrationTest : public IntegrationTestFramework
+{
+private:
+    std::unique_ptr<MockCogServer> _mock_cogserver;
+    std::unique_ptr<MockAgentZeroCore> _agent_core;
+
+public:
+    void setUp() override
+    {
+        IntegrationTestFramework::setUp();
+        
+        // Create mock CogServer
+        _mock_cogserver = std::make_unique<MockCogServer>();
+        _mock_cogserver->setAtomSpace(getTestAtomSpace());
+        
+        // Create agent with CogServer integration
+        _agent_core = std::make_unique<MockAgentZeroCore>("CogServerTestAgent");
+        _agent_core->setAtomSpace(getTestAtomSpace());
+        _agent_core->init();
+        
+        logger().set_level(Logger::INFO);
+    }
+
+    void tearDown() override
+    {
+        _agent_core.reset();
+        _mock_cogserver.reset();
+        IntegrationTestFramework::tearDown();
+    }
+
+    /**
+     * Test 1: CogServer Basic Initialization
+     * Verifies CogServer initializes correctly with Agent-Zero
+     */
+    void test_CogServer_Basic_Initialization()
+    {
+        startTestTimer("cogserver_init");
+        
+        // Verify CogServer created
+        TS_ASSERT(_mock_cogserver != nullptr);
+        
+        // Start CogServer
+        TS_ASSERT(_mock_cogserver->start());
+        TS_ASSERT(_mock_cogserver->isRunning());
+        
+        // Verify AtomSpace accessible through CogServer
+        TS_ASSERT(_mock_cogserver->getAtomSpace() != nullptr);
+        TS_ASSERT_EQUALS(_mock_cogserver->getAtomSpace(), getTestAtomSpace());
+        
+        // Stop CogServer
+        TS_ASSERT(_mock_cogserver->stop());
+        TS_ASSERT(!_mock_cogserver->isRunning());
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 2: Agent Registration with CogServer
+     * Tests registering Agent-Zero as a CogServer module
+     */
+    void test_Agent_Registration_With_CogServer()
+    {
+        startTestTimer("agent_registration");
+        
+        _mock_cogserver->start();
+        
+        // Register agent with CogServer
+        TS_ASSERT(_mock_cogserver->registerAgent(_agent_core.get()));
+        
+        // Verify agent is registered
+        TS_ASSERT(_mock_cogserver->isAgentRegistered("CogServerTestAgent"));
+        
+        // Get agent info
+        std::string agent_info = _mock_cogserver->getAgentInfo("CogServerTestAgent");
+        TS_ASSERT(!agent_info.empty());
+        TS_ASSERT(agent_info.find("CogServerTestAgent") != std::string::npos);
+        
+        // Unregister agent
+        TS_ASSERT(_mock_cogserver->unregisterAgent("CogServerTestAgent"));
+        TS_ASSERT(!_mock_cogserver->isAgentRegistered("CogServerTestAgent"));
+        
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 3: Command Execution Through CogServer
+     * Tests executing Agent-Zero commands via CogServer interface
+     */
+    void test_Command_Execution_Through_CogServer()
+    {
+        startTestTimer("command_execution");
+        
+        _mock_cogserver->start();
+        _mock_cogserver->registerAgent(_agent_core.get());
+        _agent_core->start();
+        
+        // Execute commands
+        std::string result1 = _mock_cogserver->executeCommand("agentzero.status");
+        TS_ASSERT(!result1.empty());
+        
+        std::string result2 = _mock_cogserver->executeCommand("agentzero.list_goals");
+        TS_ASSERT(!result2.empty());
+        
+        std::string result3 = _mock_cogserver->executeCommand("agentzero.get_metrics");
+        TS_ASSERT(!result3.empty());
+        
+        _agent_core->stop();
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 4: Network Access Through CogServer
+     * Tests remote access to Agent-Zero via CogServer network interface
+     */
+    void test_Network_Access_Through_CogServer()
+    {
+        startTestTimer("network_access");
+        
+        // Configure network port
+        _mock_cogserver->setPort(17001);
+        
+        // Start server
+        TS_ASSERT(_mock_cogserver->start());
+        
+        // Verify port is accessible
+        int port = _mock_cogserver->getPort();
+        TS_ASSERT_EQUALS(port, 17001);
+        
+        // Simulate network request (in real test would use socket)
+        std::string response = _mock_cogserver->handleNetworkRequest("status");
+        TS_ASSERT(!response.empty());
+        
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 5: Shared AtomSpace Through CogServer
+     * Tests multiple agents sharing AtomSpace via CogServer
+     */
+    void test_Shared_AtomSpace_Through_CogServer()
+    {
+        startTestTimer("shared_atomspace");
+        
+        _mock_cogserver->start();
+        
+        // Register first agent
+        _mock_cogserver->registerAgent(_agent_core.get());
+        
+        // Create second agent
+        auto agent2 = std::make_unique<MockAgentZeroCore>("SecondAgent");
+        agent2->setAtomSpace(getTestAtomSpace());
+        agent2->init();
+        
+        // Register second agent
+        TS_ASSERT(_mock_cogserver->registerAgent(agent2.get()));
+        
+        // Both agents should see same AtomSpace
+        TS_ASSERT_EQUALS(_agent_core->getAtomSpace(), agent2->getAtomSpace());
+        
+        // Agent 1 creates atom
+        _agent_core->start();
+        Handle atom1 = createTestAtom(CONCEPT_NODE, "SharedAtom");
+        
+        // Agent 2 should see it
+        agent2->start();
+        TS_ASSERT(getTestAtomSpace()->is_valid_handle(atom1));
+        
+        // Cleanup
+        agent2->stop();
+        _agent_core->stop();
+        _mock_cogserver->unregisterAgent("SecondAgent");
+        agent2.reset();
+        
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+    }
+
+    /**
+     * Test 6: CogServer Request/Response Pattern
+     * Tests request-response communication pattern
+     */
+    void test_CogServer_Request_Response_Pattern()
+    {
+        startTestTimer("request_response");
+        
+        _mock_cogserver->start();
+        _mock_cogserver->registerAgent(_agent_core.get());
+        _agent_core->start();
+        
+        // Set a goal via CogServer command
+        Handle goal = createTestAtom(CONCEPT_NODE, "TestGoal_ViaServer");
+        std::string set_goal_cmd = "agentzero.set_goal " + goal->get_name();
+        std::string response1 = _mock_cogserver->executeCommand(set_goal_cmd);
+        TS_ASSERT(response1.find("success") != std::string::npos || 
+                  response1.find("Goal") != std::string::npos);
+        
+        // Query goal status
+        std::string response2 = _mock_cogserver->executeCommand("agentzero.get_current_goal");
+        TS_ASSERT(!response2.empty());
+        
+        // Process cognitive step
+        std::string response3 = _mock_cogserver->executeCommand("agentzero.step");
+        TS_ASSERT(!response3.empty());
+        
+        _agent_core->stop();
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 7: Module Lifecycle Management
+     * Tests loading, starting, stopping, and unloading modules
+     */
+    void test_Module_Lifecycle_Management()
+    {
+        startTestTimer("module_lifecycle");
+        
+        _mock_cogserver->start();
+        
+        // Register (load) module
+        TS_ASSERT(_mock_cogserver->registerAgent(_agent_core.get()));
+        TS_ASSERT(_mock_cogserver->isAgentRegistered("CogServerTestAgent"));
+        
+        // Module should be initialized but not running
+        TS_ASSERT(_agent_core->isInitialized());
+        
+        // Start module
+        _agent_core->start();
+        TS_ASSERT(_agent_core->isRunning());
+        
+        // Process some cycles
+        for (int i = 0; i < 5; ++i) {
+            _agent_core->processCognitiveStep();
+        }
+        TS_ASSERT(_agent_core->getCognitiveStepsExecuted() >= 5);
+        
+        // Stop module
+        _agent_core->stop();
+        TS_ASSERT(!_agent_core->isRunning());
+        
+        // Unregister (unload) module
+        TS_ASSERT(_mock_cogserver->unregisterAgent("CogServerTestAgent"));
+        TS_ASSERT(!_mock_cogserver->isAgentRegistered("CogServerTestAgent"));
+        
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 8: CogServer Shell Interface
+     * Tests interactive shell commands
+     */
+    void test_CogServer_Shell_Interface()
+    {
+        startTestTimer("shell_interface");
+        
+        _mock_cogserver->start();
+        _mock_cogserver->registerAgent(_agent_core.get());
+        
+        // Test help command
+        std::string help = _mock_cogserver->executeCommand("help");
+        TS_ASSERT(!help.empty());
+        
+        // Test list modules command
+        std::string modules = _mock_cogserver->executeCommand("list_modules");
+        TS_ASSERT(!modules.empty());
+        
+        // Test atomspace query commands
+        createTestAtom(CONCEPT_NODE, "ShellTestAtom");
+        std::string atoms = _mock_cogserver->executeCommand("cog-get-atoms 'ConceptNode");
+        TS_ASSERT(!atoms.empty());
+        
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 9: Multi-Client Connections
+     * Tests handling multiple simultaneous client connections
+     */
+    void test_Multi_Client_Connections()
+    {
+        startTestTimer("multi_client");
+        
+        _mock_cogserver->start();
+        _mock_cogserver->registerAgent(_agent_core.get());
+        
+        // Simulate multiple clients
+        std::vector<std::string> client_responses;
+        
+        for (int i = 0; i < 5; ++i) {
+            std::string client_id = "client_" + std::to_string(i);
+            _mock_cogserver->registerClient(client_id);
+            
+            std::string response = _mock_cogserver->executeCommand("agentzero.status", client_id);
+            client_responses.push_back(response);
+            
+            TS_ASSERT(!response.empty());
+        }
+        
+        // All clients should get responses
+        TS_ASSERT_EQUALS(client_responses.size(), 5);
+        
+        // Cleanup clients
+        for (int i = 0; i < 5; ++i) {
+            std::string client_id = "client_" + std::to_string(i);
+            _mock_cogserver->unregisterClient(client_id);
+        }
+        
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 10: CogServer Event Broadcasting
+     * Tests event notification to connected clients
+     */
+    void test_CogServer_Event_Broadcasting()
+    {
+        startTestTimer("event_broadcasting");
+        
+        _mock_cogserver->start();
+        _mock_cogserver->registerAgent(_agent_core.get());
+        _agent_core->start();
+        
+        // Register event listener
+        std::vector<std::string> received_events;
+        auto event_callback = [&received_events](const std::string& event) {
+            received_events.push_back(event);
+        };
+        
+        _mock_cogserver->registerEventListener(event_callback);
+        
+        // Generate events
+        _agent_core->processCognitiveStep();
+        _mock_cogserver->broadcastEvent("cognitive_step_completed");
+        
+        Handle goal = createTestAtom(CONCEPT_NODE, "EventTestGoal");
+        _agent_core->setGoal(goal);
+        _mock_cogserver->broadcastEvent("goal_set");
+        
+        // Verify events received
+        TS_ASSERT(!received_events.empty());
+        TS_ASSERT(received_events.size() >= 2);
+        
+        _agent_core->stop();
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 11: Agent Status Monitoring
+     * Tests monitoring agent status through CogServer
+     */
+    void test_Agent_Status_Monitoring()
+    {
+        startTestTimer("status_monitoring");
+        
+        _mock_cogserver->start();
+        _mock_cogserver->registerAgent(_agent_core.get());
+        
+        // Check initial status
+        std::string status1 = _mock_cogserver->getAgentStatus("CogServerTestAgent");
+        TS_ASSERT(!status1.empty());
+        TS_ASSERT(status1.find("initialized") != std::string::npos ||
+                  status1.find("ready") != std::string::npos);
+        
+        // Start agent
+        _agent_core->start();
+        std::string status2 = _mock_cogserver->getAgentStatus("CogServerTestAgent");
+        TS_ASSERT(status2.find("running") != std::string::npos);
+        
+        // Process some steps
+        for (int i = 0; i < 10; ++i) {
+            _agent_core->processCognitiveStep();
+        }
+        
+        // Check metrics
+        std::string metrics = _mock_cogserver->getAgentMetrics("CogServerTestAgent");
+        TS_ASSERT(!metrics.empty());
+        TS_ASSERT(metrics.find("10") != std::string::npos || // step count
+                  metrics.find("cognitive") != std::string::npos);
+        
+        _agent_core->stop();
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 12: Dynamic Configuration Updates
+     * Tests updating agent configuration through CogServer
+     */
+    void test_Dynamic_Configuration_Updates()
+    {
+        startTestTimer("dynamic_config");
+        
+        _mock_cogserver->start();
+        _mock_cogserver->registerAgent(_agent_core.get());
+        _agent_core->start();
+        
+        // Update configuration via CogServer
+        std::string config1 = "enable_cognitive_loop=true";
+        std::string result1 = _mock_cogserver->executeCommand("agentzero.config " + config1);
+        TS_ASSERT(!result1.empty());
+        
+        std::string config2 = "enable_reasoning=true";
+        std::string result2 = _mock_cogserver->executeCommand("agentzero.config " + config2);
+        TS_ASSERT(!result2.empty());
+        
+        // Verify configuration was applied
+        const auto& config_history = _agent_core->getConfigurationHistory();
+        TS_ASSERT(!config_history.empty());
+        
+        _agent_core->stop();
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 13: Error Handling and Recovery
+     * Tests CogServer error handling and recovery mechanisms
+     */
+    void test_Error_Handling_And_Recovery()
+    {
+        startTestTimer("error_handling");
+        
+        _mock_cogserver->start();
+        _mock_cogserver->registerAgent(_agent_core.get());
+        
+        // Test invalid command
+        std::string result1 = _mock_cogserver->executeCommand("invalid_command");
+        TS_ASSERT(result1.find("error") != std::string::npos ||
+                  result1.find("unknown") != std::string::npos ||
+                  result1.empty());
+        
+        // Server should still be operational
+        TS_ASSERT(_mock_cogserver->isRunning());
+        
+        // Test valid command after error
+        std::string result2 = _mock_cogserver->executeCommand("help");
+        TS_ASSERT(!result2.empty());
+        
+        // Test accessing non-existent agent
+        std::string result3 = _mock_cogserver->getAgentStatus("NonExistentAgent");
+        TS_ASSERT(result3.find("error") != std::string::npos ||
+                  result3.find("not found") != std::string::npos ||
+                  result3.empty());
+        
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 14: Performance Monitoring Integration
+     * Tests performance metric collection through CogServer
+     */
+    void test_Performance_Monitoring_Integration()
+    {
+        startTestTimer("performance_monitoring");
+        
+        _mock_cogserver->start();
+        _mock_cogserver->registerAgent(_agent_core.get());
+        _agent_core->start();
+        
+        // Generate activity
+        for (int i = 0; i < 100; ++i) {
+            _agent_core->processCognitiveStep();
+        }
+        
+        // Query performance metrics
+        std::string perf_metrics = _mock_cogserver->executeCommand("agentzero.get_performance");
+        TS_ASSERT(!perf_metrics.empty());
+        
+        // Metrics should include key information
+        TS_ASSERT(perf_metrics.find("steps") != std::string::npos ||
+                  perf_metrics.find("cognitive") != std::string::npos ||
+                  perf_metrics.find("100") != std::string::npos);
+        
+        _agent_core->stop();
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 15: Integration with External Tools
+     * Tests CogServer as interface for external tool integration
+     */
+    void test_Integration_With_External_Tools()
+    {
+        startTestTimer("external_tools");
+        
+        _mock_cogserver->start();
+        _mock_cogserver->registerAgent(_agent_core.get());
+        
+        // Register external tool endpoint
+        _mock_cogserver->registerEndpoint("external_tool", "/api/tool");
+        
+        // Test tool invocation via CogServer
+        std::string tool_request = "agentzero.invoke_tool external_tool param1=value1";
+        std::string tool_response = _mock_cogserver->executeCommand(tool_request);
+        
+        // Should get some response (even if tool is mocked)
+        TS_ASSERT(!tool_response.empty());
+        
+        // Verify endpoint is registered
+        TS_ASSERT(_mock_cogserver->isEndpointRegistered("external_tool"));
+        
+        _mock_cogserver->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+};

@@ -1,0 +1,369 @@
+/*
+ * tests/unit-tests/MockObjectsUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for Mock Objects
+ * Part of AZ-TEST-001: Create unit test framework for Agent-Zero modules
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <memory>
+
+#include "../framework/TestFramework.h"
+#include "../mocks/MockObjects.h"
+
+using namespace opencog::agentzero::test;
+using namespace opencog::agentzero::test::mocks;
+
+class MockObjectsUTest : public UnitTestFramework
+{
+private:
+    std::unique_ptr<MockAgentZeroCore> mock_agent;
+    std::unique_ptr<MockCognitiveLoop> mock_loop;
+    std::unique_ptr<MockTaskManager> mock_task_manager;
+    std::unique_ptr<MockKnowledgeIntegrator> mock_knowledge;
+    std::unique_ptr<MockCogServer> mock_cogserver;
+
+public:
+    void setUp()
+    {
+        UnitTestFramework::setUp();
+        
+        mock_agent = std::make_unique<MockAgentZeroCore>("TestMockAgent");
+        mock_loop = std::make_unique<MockCognitiveLoop>(getTestAtomSpace());
+        mock_task_manager = std::make_unique<MockTaskManager>(getTestAtomSpace());
+        mock_knowledge = std::make_unique<MockKnowledgeIntegrator>(getTestAtomSpace());
+        mock_cogserver = std::make_unique<MockCogServer>();
+    }
+
+    void tearDown()
+    {
+        mock_agent.reset();
+        mock_loop.reset();
+        mock_task_manager.reset();
+        mock_knowledge.reset();
+        mock_cogserver.reset();
+        
+        UnitTestFramework::tearDown();
+    }
+
+    void test_MockAgentZeroCore_BasicLifecycle()
+    {
+        // Test initial state
+        TS_ASSERT_EQUALS(mock_agent->getAgentName(), "TestMockAgent");
+        TS_ASSERT_EQUALS(mock_agent->isInitialized(), false);
+        TS_ASSERT_EQUALS(mock_agent->isRunning(), false);
+        TS_ASSERT_EQUALS(mock_agent->id(), std::string("MockAgentZeroCore"));
+        
+        // Test initialization
+        bool init_result = mock_agent->init();
+        TS_ASSERT_EQUALS(init_result, true);
+        TS_ASSERT_EQUALS(mock_agent->isInitialized(), true);
+        TS_ASSERT(mock_agent->getAtomSpace() != nullptr);
+        TS_ASSERT(mock_agent->getAgentSelfAtom() != Handle::UNDEFINED);
+        
+        // Test component access
+        TS_ASSERT(mock_agent->getCognitiveLoop() != nullptr);
+        TS_ASSERT(mock_agent->getTaskManager() != nullptr);
+        TS_ASSERT(mock_agent->getKnowledgeIntegrator() != nullptr);
+        
+        // Test start/stop
+        TS_ASSERT(mock_agent->start());
+        TS_ASSERT_EQUALS(mock_agent->isRunning(), true);
+        
+        TS_ASSERT(mock_agent->stop());
+        TS_ASSERT_EQUALS(mock_agent->isRunning(), false);
+    }
+
+    void test_MockAgentZeroCore_Configuration()
+    {
+        mock_agent->init();
+        
+        // Test configuration
+        TS_ASSERT(mock_agent->config("cognitive_loop=false;goal_processing=true"));
+        TS_ASSERT(mock_agent->config(""));  // Empty config should succeed
+        TS_ASSERT_EQUALS(mock_agent->config(""), true);
+        
+        const auto& config_history = mock_agent->getConfigurationHistory();
+        TS_ASSERT_EQUALS(config_history.size(), 1);  // Empty string not recorded
+        TS_ASSERT_EQUALS(config_history[0], "cognitive_loop=false;goal_processing=true");
+    }
+
+    void test_MockAgentZeroCore_GoalManagement()
+    {
+        mock_agent->init();
+        
+        // Test goal setting
+        Handle goal = createTestAtom(CONCEPT_NODE, "TestGoal");
+        TS_ASSERT(mock_agent->setGoal(goal));
+        TS_ASSERT_EQUALS(mock_agent->getCurrentGoal(), goal);
+        
+        // Test invalid goal
+        TS_ASSERT_EQUALS(mock_agent->setGoal(Handle::UNDEFINED), false);
+    }
+
+    void test_MockAgentZeroCore_CognitiveProcessing()
+    {
+        mock_agent->init();
+        mock_agent->start();
+        
+        // Test cognitive step processing
+        int initial_steps = mock_agent->getCognitiveStepsExecuted();
+        TS_ASSERT(mock_agent->processCognitiveStep());
+        TS_ASSERT_EQUALS(mock_agent->getCognitiveStepsExecuted(), initial_steps + 1);
+        
+        // Process multiple steps
+        for (int i = 0; i < 5; ++i) {
+            mock_agent->processCognitiveStep();
+        }
+        TS_ASSERT_EQUALS(mock_agent->getCognitiveStepsExecuted(), initial_steps + 6);
+    }
+
+    void test_MockCognitiveLoop_BasicOperations()
+    {
+        // Test initial state
+        TS_ASSERT_EQUALS(mock_loop->isRunning(), false);
+        TS_ASSERT_EQUALS(mock_loop->isPaused(), false);
+        TS_ASSERT_EQUALS(mock_loop->getCycleCount(), 0);
+        
+        // Test start/stop
+        TS_ASSERT(mock_loop->start());
+        TS_ASSERT_EQUALS(mock_loop->isRunning(), true);
+        
+        TS_ASSERT(mock_loop->stop());
+        TS_ASSERT_EQUALS(mock_loop->isRunning(), false);
+    }
+
+    void test_MockCognitiveLoop_CycleExecution()
+    {
+        mock_loop->start();
+        
+        // Test single cycle execution
+        TS_ASSERT(mock_loop->executeSingleCycle());
+        TS_ASSERT_EQUALS(mock_loop->getCycleCount(), 1);
+        
+        const auto& executed_phases = mock_loop->getExecutedPhases();
+        TS_ASSERT_EQUALS(executed_phases.size(), 4);  // perception, reasoning, planning, action
+        TS_ASSERT(std::find(executed_phases.begin(), executed_phases.end(), "perception") != executed_phases.end());
+        TS_ASSERT(std::find(executed_phases.begin(), executed_phases.end(), "reasoning") != executed_phases.end());
+        TS_ASSERT(std::find(executed_phases.begin(), executed_phases.end(), "planning") != executed_phases.end());
+        TS_ASSERT(std::find(executed_phases.begin(), executed_phases.end(), "action") != executed_phases.end());
+        
+        // Test multiple cycles
+        TS_ASSERT(mock_loop->executeMultipleCycles(3));
+        TS_ASSERT_EQUALS(mock_loop->getCycleCount(), 4);
+    }
+
+    void test_MockCognitiveLoop_PhaseConfiguration()
+    {
+        mock_loop->start();
+        
+        // Configure to run only perception and reasoning
+        mock_loop->configurePhases(true, true, false, false);
+        
+        TS_ASSERT(mock_loop->executeSingleCycle());
+        
+        const auto& executed_phases = mock_loop->getExecutedPhases();
+        TS_ASSERT_EQUALS(executed_phases.size(), 2);
+        TS_ASSERT(std::find(executed_phases.begin(), executed_phases.end(), "perception") != executed_phases.end());
+        TS_ASSERT(std::find(executed_phases.begin(), executed_phases.end(), "reasoning") != executed_phases.end());
+        TS_ASSERT(std::find(executed_phases.begin(), executed_phases.end(), "planning") == executed_phases.end());
+        TS_ASSERT(std::find(executed_phases.begin(), executed_phases.end(), "action") == executed_phases.end());
+    }
+
+    void test_MockTaskManager_GoalManagement()
+    {
+        // Test goal creation
+        Handle goal = mock_task_manager->setGoal("TestGoal", false);
+        TS_ASSERT(goal != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(mock_task_manager->getCurrentGoal(), goal);
+        TS_ASSERT(mock_task_manager->hasActiveGoal());
+        
+        // Test goal with decomposition
+        Handle complex_goal = mock_task_manager->setGoal("ComplexGoal", true);
+        TS_ASSERT(complex_goal != Handle::UNDEFINED);
+        
+        std::vector<Handle> subtasks = mock_task_manager->getSubtasks(complex_goal);
+        TS_ASSERT_EQUALS(subtasks.size(), 3);  // analyze, plan, execute
+    }
+
+    void test_MockTaskManager_TaskLifecycle()
+    {
+        // Test task creation
+        Handle task = mock_task_manager->createTask("TestTask", MockTaskManager::Priority::HIGH);
+        TS_ASSERT(task != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(mock_task_manager->getTaskStatus(task), MockTaskManager::TaskStatus::PENDING);
+        TS_ASSERT_EQUALS(mock_task_manager->getTaskPriority(task), MockTaskManager::Priority::HIGH);
+        
+        // Test task completion
+        TS_ASSERT(mock_task_manager->completeTask(task, true));
+        TS_ASSERT_EQUALS(mock_task_manager->getTaskStatus(task), MockTaskManager::TaskStatus::COMPLETED);
+        
+        // Test task cancellation
+        Handle task2 = mock_task_manager->createTask("CancelTask", MockTaskManager::Priority::MEDIUM);
+        TS_ASSERT(mock_task_manager->cancelTask(task2));
+        TS_ASSERT_EQUALS(mock_task_manager->getTaskStatus(task2), MockTaskManager::TaskStatus::CANCELLED);
+    }
+
+    void test_MockTaskManager_Statistics()
+    {
+        // Create and manage multiple tasks
+        Handle task1 = mock_task_manager->createTask("Task1", MockTaskManager::Priority::HIGH);
+        Handle task2 = mock_task_manager->createTask("Task2", MockTaskManager::Priority::MEDIUM);
+        Handle task3 = mock_task_manager->createTask("Task3", MockTaskManager::Priority::LOW);
+        
+        TS_ASSERT_EQUALS(mock_task_manager->getTaskCount(), 3);
+        TS_ASSERT_EQUALS(mock_task_manager->getCompletedTaskCount(), 0);
+        TS_ASSERT_EQUALS(mock_task_manager->getFailedTaskCount(), 0);
+        
+        // Complete some tasks
+        mock_task_manager->completeTask(task1, true);
+        mock_task_manager->completeTask(task2, false);  // Failed
+        
+        TS_ASSERT_EQUALS(mock_task_manager->getCompletedTaskCount(), 1);
+        TS_ASSERT_EQUALS(mock_task_manager->getFailedTaskCount(), 1);
+        
+        // Test pending tasks
+        auto pending_tasks = mock_task_manager->getPendingTasks();
+        TS_ASSERT_EQUALS(pending_tasks.size(), 1);
+        TS_ASSERT_EQUALS(pending_tasks[0], task3);
+    }
+
+    void test_MockKnowledgeIntegrator_KnowledgeAddition()
+    {
+        // Test fact addition
+        Handle fact = mock_knowledge->addFact("Test fact", MockKnowledgeIntegrator::ConfidenceLevel::HIGH);
+        TS_ASSERT(fact != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(mock_knowledge->getFactCount(), 1);
+        
+        // Test procedure addition
+        std::vector<std::string> steps = {"Step 1", "Step 2", "Step 3"};
+        Handle procedure = mock_knowledge->addProcedure("Test procedure", steps, MockKnowledgeIntegrator::ConfidenceLevel::MEDIUM);
+        TS_ASSERT(procedure != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(mock_knowledge->getProcedureCount(), 1);
+        
+        // Test episode addition
+        std::vector<Handle> context = {fact};
+        Handle episode = mock_knowledge->addEpisode("Test episode", context, MockKnowledgeIntegrator::ConfidenceLevel::LOW);
+        TS_ASSERT(episode != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(mock_knowledge->getEpisodeCount(), 1);
+    }
+
+    void test_MockKnowledgeIntegrator_ConceptManagement()
+    {
+        // Test concept registration
+        Handle concept = mock_knowledge->registerConcept("TestConcept", "A test concept");
+        TS_ASSERT(concept != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(mock_knowledge->getConceptCount(), 1);
+        TS_ASSERT(mock_knowledge->hasKnowledgeAbout("TestConcept"));
+        TS_ASSERT_EQUALS(mock_knowledge->getConcept("TestConcept"), concept);
+        
+        // Test duplicate registration
+        Handle duplicate = mock_knowledge->registerConcept("TestConcept", "Duplicate description");
+        TS_ASSERT_EQUALS(duplicate, concept);  // Should return existing concept
+        TS_ASSERT_EQUALS(mock_knowledge->getConceptCount(), 1);  // Count should not increase
+    }
+
+    void test_MockKnowledgeIntegrator_SemanticRelations()
+    {
+        // Test semantic relation creation
+        Handle relation = mock_knowledge->addSemanticRelation("Subject", "predicate", "Object", 
+                                                              MockKnowledgeIntegrator::ConfidenceLevel::HIGH);
+        TS_ASSERT(relation != Handle::UNDEFINED);
+        
+        // Should have created concepts for subject and object
+        TS_ASSERT(mock_knowledge->hasKnowledgeAbout("Subject"));
+        TS_ASSERT(mock_knowledge->hasKnowledgeAbout("Object"));
+        TS_ASSERT(mock_knowledge->hasKnowledgeAbout("predicate"));
+        TS_ASSERT_EQUALS(mock_knowledge->getConceptCount(), 3);
+    }
+
+    void test_MockKnowledgeIntegrator_KnowledgeQueries()
+    {
+        // Set up some knowledge
+        mock_knowledge->registerConcept("Sky", "The atmosphere");
+        mock_knowledge->registerConcept("Blue", "A color");
+        mock_knowledge->registerConcept("Skyline", "City horizon");
+        
+        // Test knowledge queries
+        auto results = mock_knowledge->queryKnowledge("Sky", 10);
+        TS_ASSERT_EQUALS(results.size(), 2);  // Sky and Skyline should match
+        
+        // Test related concepts
+        auto related = mock_knowledge->getRelatedConcepts("Sky");
+        TS_ASSERT(related.size() > 0);
+    }
+
+    void test_TestDataFactory_TestDataCreation()
+    {
+        auto atomspace = getTestAtomSpace();
+        
+        // Test atom creation
+        auto test_atoms = TestDataFactory::createTestAtoms(atomspace.get(), 5);
+        TS_ASSERT_EQUALS(test_atoms.size(), 5);
+        TS_ASSERT_EQUALS(getAtomSpaceSize(), 5);
+        
+        // Test goal creation
+        Handle goal = TestDataFactory::createTestGoal(atomspace.get(), "TestGoal");
+        TS_ASSERT(goal != Handle::UNDEFINED);
+        
+        // Test knowledge creation
+        auto knowledge_atoms = TestDataFactory::createTestKnowledge(atomspace.get(), 3);
+        TS_ASSERT_EQUALS(knowledge_atoms.size(), 3);
+    }
+
+    void test_TestDataFactory_ScenarioSetup()
+    {
+        // Test basic cognitive scenario setup
+        TestDataFactory::setupBasicCognitiveScenario(mock_agent.get());
+        TS_ASSERT(mock_agent->isInitialized());
+        TS_ASSERT(mock_agent->getCurrentGoal() != Handle::UNDEFINED);
+        
+        // Test knowledge integration scenario
+        TestDataFactory::setupKnowledgeIntegrationScenario(mock_knowledge.get());
+        TS_ASSERT(mock_knowledge->getFactCount() > 0);
+        TS_ASSERT(mock_knowledge->getConceptCount() > 0);
+        TS_ASSERT(mock_knowledge->getProcedureCount() > 0);
+        
+        // Test task management scenario
+        TestDataFactory::setupTaskManagementScenario(mock_task_manager.get());
+        TS_ASSERT(mock_task_manager->hasActiveGoal());
+        TS_ASSERT(mock_task_manager->getTaskCount() > 0);
+    }
+
+    void test_MockObjectsReset()
+    {
+        // Set up some state
+        mock_agent->init();
+        mock_agent->start();
+        mock_agent->config("test_config");
+        
+        mock_loop->start();
+        mock_loop->executeSingleCycle();
+        
+        mock_task_manager->createTask("TestTask", MockTaskManager::Priority::HIGH);
+        mock_knowledge->addFact("Test fact");
+        
+        // Verify state exists
+        TS_ASSERT(mock_agent->isInitialized());
+        TS_ASSERT(mock_agent->isRunning());
+        TS_ASSERT(mock_loop->getCycleCount() > 0);
+        TS_ASSERT(mock_task_manager->getTaskCount() > 0);
+        TS_ASSERT(mock_knowledge->getFactCount() > 0);
+        
+        // Reset everything
+        mock_agent->reset();
+        mock_loop->reset();
+        mock_task_manager->reset();
+        mock_knowledge->reset();
+        
+        // Verify reset
+        TS_ASSERT_EQUALS(mock_agent->isInitialized(), false);
+        TS_ASSERT_EQUALS(mock_agent->isRunning(), false);
+        TS_ASSERT_EQUALS(mock_loop->getCycleCount(), 0);
+        TS_ASSERT_EQUALS(mock_task_manager->getTaskCount(), 0);
+        TS_ASSERT_EQUALS(mock_knowledge->getFactCount(), 0);
+    }
+};

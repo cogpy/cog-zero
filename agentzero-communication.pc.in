@@ -1,0 +1,13 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: agentzero-communication
+Description: Agent-Zero Communication & Human Interface Module
+Version: @PROJECT_VERSION@
+URL: https://github.com/OpenCoq/pycog0
+
+Requires: cogutil >= 2.0.3, atomspace >= 5.0.4
+Libs: -L${libdir} -lagentzero-communication
+Cflags: -I${includedir}

@@ -1,0 +1,502 @@
+/*
+ * tests/ContextManagerUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for ContextManager
+ * Part of the AGENT-ZERO-GENESIS project - AZ-CONTEXT-001
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/atom_types/atom_types.h>
+#include <opencog/agentzero/memory/ContextManager.h>
+#include <opencog/agentzero/memory/MemoryTypes.h>
+#include <thread>
+#include <chrono>
+
+using namespace opencog;
+using namespace opencog::agentzero::memory;
+
+class ContextManagerUTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr atomspace;
+    std::unique_ptr<ContextManager> context_manager;
+
+public:
+    void setUp()
+    {
+        atomspace = std::make_shared<AtomSpace>();
+        context_manager = std::make_unique<ContextManager>(atomspace, 50, 0.1);
+        context_manager->initialize();
+    }
+
+    void tearDown()
+    {
+        context_manager->shutdown();
+        context_manager.reset();
+        atomspace.reset();
+    }
+
+    // === Basic Operations Tests ===
+
+    void test_initialization()
+    {
+        TS_ASSERT(context_manager != nullptr);
+        TS_ASSERT_EQUALS(context_manager->getContextCount(), 0);
+    }
+
+    void test_create_context()
+    {
+        bool result = context_manager->createContext("test_ctx", ContextType::TASK);
+        TS_ASSERT(result);
+        TS_ASSERT(context_manager->hasContext("test_ctx"));
+        TS_ASSERT_EQUALS(context_manager->getContextCount(), 1);
+    }
+
+    void test_create_context_with_metadata()
+    {
+        std::map<std::string, std::string> metadata;
+        metadata["goal"] = "test_goal";
+        metadata["priority"] = "high";
+        
+        bool result = context_manager->createContext("meta_ctx", ContextType::TASK, metadata, 0.8);
+        TS_ASSERT(result);
+        
+        TS_ASSERT_EQUALS(context_manager->getContextMetadata("meta_ctx", "goal"), "test_goal");
+        TS_ASSERT_EQUALS(context_manager->getContextMetadata("meta_ctx", "priority"), "high");
+        TS_ASSERT_DELTA(context_manager->getContextImportance("meta_ctx"), 0.8, 0.01);
+    }
+
+    void test_create_duplicate_context()
+    {
+        context_manager->createContext("dup_ctx", ContextType::COGNITIVE);
+        bool result = context_manager->createContext("dup_ctx", ContextType::TEMPORAL);
+        TS_ASSERT(!result);  // Should fail
+        TS_ASSERT_EQUALS(context_manager->getContextCount(), 1);
+    }
+
+    void test_delete_context()
+    {
+        context_manager->createContext("del_ctx", ContextType::SPATIAL);
+        TS_ASSERT(context_manager->hasContext("del_ctx"));
+        
+        bool result = context_manager->deleteContext("del_ctx");
+        TS_ASSERT(result);
+        TS_ASSERT(!context_manager->hasContext("del_ctx"));
+    }
+
+    void test_delete_nonexistent_context()
+    {
+        bool result = context_manager->deleteContext("nonexistent");
+        TS_ASSERT(!result);
+    }
+
+    void test_get_context()
+    {
+        context_manager->createContext("get_ctx", ContextType::SOCIAL);
+        auto entry = context_manager->getContext("get_ctx");
+        
+        TS_ASSERT(entry != nullptr);
+        TS_ASSERT_EQUALS(entry->context_id, "get_ctx");
+        TS_ASSERT_EQUALS(entry->context_type, ContextType::SOCIAL);
+    }
+
+    // === Active Context Tests ===
+
+    void test_set_active_context()
+    {
+        context_manager->createContext("active_ctx", ContextType::TASK);
+        bool result = context_manager->setActiveContext("active_ctx");
+        
+        TS_ASSERT(result);
+        TS_ASSERT_EQUALS(context_manager->getActiveContext(), "active_ctx");
+    }
+
+    void test_set_nonexistent_active_context()
+    {
+        bool result = context_manager->setActiveContext("nonexistent");
+        TS_ASSERT(!result);
+        TS_ASSERT_EQUALS(context_manager->getActiveContext(), "");
+    }
+
+    void test_clear_active_context()
+    {
+        context_manager->createContext("clear_ctx", ContextType::COGNITIVE);
+        context_manager->setActiveContext("clear_ctx");
+        
+        bool result = context_manager->clearActiveContext();
+        TS_ASSERT(result);
+        TS_ASSERT_EQUALS(context_manager->getActiveContext(), "");
+    }
+
+    void test_context_switching()
+    {
+        context_manager->createContext("ctx1", ContextType::TASK);
+        context_manager->createContext("ctx2", ContextType::COGNITIVE);
+        
+        context_manager->setActiveContext("ctx1");
+        TS_ASSERT_EQUALS(context_manager->getActiveContext(), "ctx1");
+        
+        context_manager->setActiveContext("ctx2");
+        TS_ASSERT_EQUALS(context_manager->getActiveContext(), "ctx2");
+        
+        auto history = context_manager->getContextHistory(5);
+        TS_ASSERT(history.size() >= 2);
+        TS_ASSERT_EQUALS(history[0], "ctx2");  // Most recent
+        TS_ASSERT_EQUALS(history[1], "ctx1");
+    }
+
+    // === Atom Management Tests ===
+
+    void test_add_atom_to_context()
+    {
+        context_manager->createContext("atom_ctx", ContextType::SPATIAL);
+        Handle atom = atomspace->add_node(CONCEPT_NODE, "TestConcept");
+        
+        bool result = context_manager->addAtomToContext("atom_ctx", atom);
+        TS_ASSERT(result);
+        
+        auto atoms = context_manager->getAtomsInContext("atom_ctx");
+        TS_ASSERT_EQUALS(atoms.size(), 1);
+        TS_ASSERT(atoms.find(atom) != atoms.end());
+    }
+
+    void test_add_multiple_atoms_to_context()
+    {
+        context_manager->createContext("multi_atom_ctx", ContextType::ENVIRONMENTAL);
+        
+        Handle atom1 = atomspace->add_node(CONCEPT_NODE, "Concept1");
+        Handle atom2 = atomspace->add_node(CONCEPT_NODE, "Concept2");
+        Handle atom3 = atomspace->add_node(PREDICATE_NODE, "Predicate1");
+        
+        context_manager->addAtomToContext("multi_atom_ctx", atom1);
+        context_manager->addAtomToContext("multi_atom_ctx", atom2);
+        context_manager->addAtomToContext("multi_atom_ctx", atom3);
+        
+        auto atoms = context_manager->getAtomsInContext("multi_atom_ctx");
+        TS_ASSERT_EQUALS(atoms.size(), 3);
+    }
+
+    void test_remove_atom_from_context()
+    {
+        context_manager->createContext("remove_atom_ctx", ContextType::COGNITIVE);
+        Handle atom = atomspace->add_node(CONCEPT_NODE, "RemoveConcept");
+        
+        context_manager->addAtomToContext("remove_atom_ctx", atom);
+        TS_ASSERT_EQUALS(context_manager->getAtomsInContext("remove_atom_ctx").size(), 1);
+        
+        bool result = context_manager->removeAtomFromContext("remove_atom_ctx", atom);
+        TS_ASSERT(result);
+        TS_ASSERT_EQUALS(context_manager->getAtomsInContext("remove_atom_ctx").size(), 0);
+    }
+
+    void test_get_contexts_for_atom()
+    {
+        context_manager->createContext("ctx_a", ContextType::TASK);
+        context_manager->createContext("ctx_b", ContextType::SPATIAL);
+        
+        Handle atom = atomspace->add_node(CONCEPT_NODE, "SharedConcept");
+        
+        context_manager->addAtomToContext("ctx_a", atom);
+        context_manager->addAtomToContext("ctx_b", atom);
+        
+        auto contexts = context_manager->getContextsForAtom(atom);
+        TS_ASSERT_EQUALS(contexts.size(), 2);
+        TS_ASSERT(contexts.find("ctx_a") != contexts.end());
+        TS_ASSERT(contexts.find("ctx_b") != contexts.end());
+    }
+
+    void test_clear_context_atoms()
+    {
+        context_manager->createContext("clear_atoms_ctx", ContextType::EMOTIONAL);
+        
+        Handle atom1 = atomspace->add_node(CONCEPT_NODE, "Clear1");
+        Handle atom2 = atomspace->add_node(CONCEPT_NODE, "Clear2");
+        
+        context_manager->addAtomToContext("clear_atoms_ctx", atom1);
+        context_manager->addAtomToContext("clear_atoms_ctx", atom2);
+        
+        bool result = context_manager->clearContextAtoms("clear_atoms_ctx");
+        TS_ASSERT(result);
+        TS_ASSERT_EQUALS(context_manager->getAtomsInContext("clear_atoms_ctx").size(), 0);
+    }
+
+    // === Query and Filter Tests ===
+
+    void test_get_all_contexts()
+    {
+        context_manager->createContext("ctx1", ContextType::TASK);
+        context_manager->createContext("ctx2", ContextType::SPATIAL);
+        context_manager->createContext("ctx3", ContextType::COGNITIVE);
+        
+        auto all_contexts = context_manager->getAllContexts();
+        TS_ASSERT_EQUALS(all_contexts.size(), 3);
+    }
+
+    void test_get_contexts_by_type()
+    {
+        context_manager->createContext("task1", ContextType::TASK);
+        context_manager->createContext("task2", ContextType::TASK);
+        context_manager->createContext("spatial1", ContextType::SPATIAL);
+        
+        auto task_contexts = context_manager->getContextsByType(ContextType::TASK);
+        TS_ASSERT_EQUALS(task_contexts.size(), 2);
+        
+        auto spatial_contexts = context_manager->getContextsByType(ContextType::SPATIAL);
+        TS_ASSERT_EQUALS(spatial_contexts.size(), 1);
+    }
+
+    void test_get_contexts_by_importance()
+    {
+        context_manager->createContext("low", ContextType::COGNITIVE, {}, 0.2);
+        context_manager->createContext("medium", ContextType::COGNITIVE, {}, 0.5);
+        context_manager->createContext("high", ContextType::COGNITIVE, {}, 0.9);
+        
+        auto important_contexts = context_manager->getContextsByImportance(0.6);
+        TS_ASSERT_EQUALS(important_contexts.size(), 1);
+        TS_ASSERT_EQUALS(important_contexts[0], "high");
+    }
+
+    void test_get_most_important_contexts()
+    {
+        context_manager->createContext("imp1", ContextType::TASK, {}, 0.3);
+        context_manager->createContext("imp2", ContextType::TASK, {}, 0.7);
+        context_manager->createContext("imp3", ContextType::TASK, {}, 0.5);
+        context_manager->createContext("imp4", ContextType::TASK, {}, 0.9);
+        
+        auto top_contexts = context_manager->getMostImportantContexts(2);
+        TS_ASSERT_EQUALS(top_contexts.size(), 2);
+        TS_ASSERT_EQUALS(top_contexts[0], "imp4");  // Highest first
+        TS_ASSERT_EQUALS(top_contexts[1], "imp2");
+    }
+
+    // === Metadata Tests ===
+
+    void test_set_and_get_metadata()
+    {
+        context_manager->createContext("meta_test", ContextType::SOCIAL);
+        
+        bool result = context_manager->setContextMetadata("meta_test", "user", "alice");
+        TS_ASSERT(result);
+        
+        std::string value = context_manager->getContextMetadata("meta_test", "user");
+        TS_ASSERT_EQUALS(value, "alice");
+    }
+
+    void test_get_all_metadata()
+    {
+        context_manager->createContext("all_meta", ContextType::ENVIRONMENTAL);
+        
+        context_manager->setContextMetadata("all_meta", "location", "kitchen");
+        context_manager->setContextMetadata("all_meta", "temperature", "warm");
+        context_manager->setContextMetadata("all_meta", "lighting", "bright");
+        
+        auto metadata = context_manager->getAllContextMetadata("all_meta");
+        TS_ASSERT_EQUALS(metadata.size(), 3);
+        TS_ASSERT_EQUALS(metadata["location"], "kitchen");
+        TS_ASSERT_EQUALS(metadata["temperature"], "warm");
+        TS_ASSERT_EQUALS(metadata["lighting"], "bright");
+    }
+
+    // === Importance Management Tests ===
+
+    void test_set_context_importance()
+    {
+        context_manager->createContext("imp_ctx", ContextType::TEMPORAL);
+        
+        bool result = context_manager->setContextImportance("imp_ctx", 0.75);
+        TS_ASSERT(result);
+        
+        double importance = context_manager->getContextImportance("imp_ctx");
+        TS_ASSERT_DELTA(importance, 0.75, 0.01);
+    }
+
+    void test_importance_clamping()
+    {
+        context_manager->createContext("clamp_ctx", ContextType::COGNITIVE);
+        
+        // Test upper bound
+        context_manager->setContextImportance("clamp_ctx", 1.5);
+        TS_ASSERT_DELTA(context_manager->getContextImportance("clamp_ctx"), 1.0, 0.01);
+        
+        // Test lower bound
+        context_manager->setContextImportance("clamp_ctx", -0.5);
+        TS_ASSERT_DELTA(context_manager->getContextImportance("clamp_ctx"), 0.0, 0.01);
+    }
+
+    void test_boost_context_importance()
+    {
+        context_manager->createContext("boost_ctx", ContextType::TASK);
+        context_manager->setContextImportance("boost_ctx", 0.5);
+        
+        bool result = context_manager->boostContextImportance("boost_ctx", 1.5);
+        TS_ASSERT(result);
+        
+        double importance = context_manager->getContextImportance("boost_ctx");
+        TS_ASSERT_DELTA(importance, 0.75, 0.01);
+    }
+
+    void test_decay_context_importances()
+    {
+        // This test requires time to pass, so we just verify it runs
+        context_manager->createContext("decay1", ContextType::COGNITIVE, {}, 0.8);
+        context_manager->createContext("decay2", ContextType::COGNITIVE, {}, 0.9);
+        
+        size_t decayed = context_manager->decayContextImportances();
+        // Should be 0 since contexts were just created
+        TS_ASSERT_EQUALS(decayed, 0);
+    }
+
+    // === Statistics Tests ===
+
+    void test_get_statistics()
+    {
+        context_manager->createContext("stat1", ContextType::TASK);
+        context_manager->createContext("stat2", ContextType::COGNITIVE);
+        context_manager->setActiveContext("stat1");
+        
+        auto stats = context_manager->getStatistics();
+        TS_ASSERT_EQUALS(stats.total_contexts, 2);
+        TS_ASSERT_EQUALS(stats.active_contexts, 1);
+    }
+
+    void test_get_context_count()
+    {
+        TS_ASSERT_EQUALS(context_manager->getContextCount(), 0);
+        
+        context_manager->createContext("count1", ContextType::TASK);
+        TS_ASSERT_EQUALS(context_manager->getContextCount(), 1);
+        
+        context_manager->createContext("count2", ContextType::SPATIAL);
+        TS_ASSERT_EQUALS(context_manager->getContextCount(), 2);
+        
+        context_manager->deleteContext("count1");
+        TS_ASSERT_EQUALS(context_manager->getContextCount(), 1);
+    }
+
+    void test_get_total_atom_count()
+    {
+        context_manager->createContext("atom_count_ctx", ContextType::COGNITIVE);
+        
+        Handle atom1 = atomspace->add_node(CONCEPT_NODE, "AtomCount1");
+        Handle atom2 = atomspace->add_node(CONCEPT_NODE, "AtomCount2");
+        
+        context_manager->addAtomToContext("atom_count_ctx", atom1);
+        context_manager->addAtomToContext("atom_count_ctx", atom2);
+        
+        TS_ASSERT_EQUALS(context_manager->getTotalAtomCount(), 2);
+    }
+
+    void test_get_context_info()
+    {
+        context_manager->createContext("info_ctx", ContextType::SOCIAL, {}, 0.6);
+        Handle atom = atomspace->add_node(CONCEPT_NODE, "InfoAtom");
+        context_manager->addAtomToContext("info_ctx", atom);
+        
+        auto info = context_manager->getContextInfo("info_ctx");
+        TS_ASSERT(info.find("context_id") != info.end());
+        TS_ASSERT_EQUALS(info["context_id"], "info_ctx");
+        TS_ASSERT_EQUALS(info["atom_count"], "1");
+    }
+
+    // === Utility Tests ===
+
+    void test_clear_all_contexts()
+    {
+        context_manager->createContext("clear1", ContextType::TASK);
+        context_manager->createContext("clear2", ContextType::COGNITIVE);
+        context_manager->createContext("clear3", ContextType::SPATIAL);
+        
+        TS_ASSERT_EQUALS(context_manager->getContextCount(), 3);
+        
+        bool result = context_manager->clearAllContexts();
+        TS_ASSERT(result);
+        TS_ASSERT_EQUALS(context_manager->getContextCount(), 0);
+    }
+
+    void test_merge_contexts()
+    {
+        context_manager->createContext("merge_src", ContextType::TASK, {}, 0.6);
+        context_manager->createContext("merge_tgt", ContextType::TASK, {}, 0.4);
+        
+        Handle atom1 = atomspace->add_node(CONCEPT_NODE, "MergeAtom1");
+        Handle atom2 = atomspace->add_node(CONCEPT_NODE, "MergeAtom2");
+        
+        context_manager->addAtomToContext("merge_src", atom1);
+        context_manager->addAtomToContext("merge_tgt", atom2);
+        
+        bool result = context_manager->mergeContexts("merge_src", "merge_tgt", true);
+        TS_ASSERT(result);
+        
+        // Source should be deleted
+        TS_ASSERT(!context_manager->hasContext("merge_src"));
+        
+        // Target should have both atoms
+        auto atoms = context_manager->getAtomsInContext("merge_tgt");
+        TS_ASSERT_EQUALS(atoms.size(), 2);
+    }
+
+    void test_create_context_snapshot()
+    {
+        context_manager->createContext("snap1", ContextType::TASK);
+        context_manager->createContext("snap2", ContextType::COGNITIVE);
+        context_manager->setActiveContext("snap1");
+        
+        Handle snapshot = context_manager->createContextSnapshot();
+        TS_ASSERT(snapshot != Handle::UNDEFINED);
+        
+        // Snapshot should be in atomspace
+        TS_ASSERT(atomspace->is_valid_handle(snapshot));
+    }
+
+    // === Edge Case Tests ===
+
+    void test_empty_context_id()
+    {
+        bool result = context_manager->createContext("", ContextType::COGNITIVE);
+        TS_ASSERT(!result);
+    }
+
+    void test_add_undefined_atom()
+    {
+        context_manager->createContext("undef_atom", ContextType::TASK);
+        bool result = context_manager->addAtomToContext("undef_atom", Handle::UNDEFINED);
+        TS_ASSERT(!result);
+    }
+
+    void test_max_contexts_limit()
+    {
+        // Create manager with small limit
+        auto small_manager = std::make_unique<ContextManager>(atomspace, 3, 0.1);
+        small_manager->initialize();
+        
+        small_manager->createContext("limit1", ContextType::TASK, {}, 0.2);
+        small_manager->createContext("limit2", ContextType::TASK, {}, 0.3);
+        small_manager->createContext("limit3", ContextType::TASK, {}, 0.4);
+        
+        // This should trigger cleanup
+        small_manager->createContext("limit4", ContextType::TASK, {}, 0.9);
+        
+        // Some low-importance contexts should have been removed
+        TS_ASSERT(small_manager->getContextCount() <= 4);
+        
+        small_manager->shutdown();
+    }
+
+    void test_context_history_limit()
+    {
+        for (int i = 0; i < 150; i++) {
+            std::string ctx_id = "hist_ctx_" + std::to_string(i);
+            context_manager->createContext(ctx_id, ContextType::COGNITIVE);
+            context_manager->setActiveContext(ctx_id);
+        }
+        
+        auto history = context_manager->getContextHistory(200);
+        // History should be limited
+        TS_ASSERT(history.size() <= 100);
+    }
+};

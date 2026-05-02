@@ -1,0 +1,573 @@
+/*
+ * tests/integration-tests/AtomSpaceIntegrationTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Comprehensive AtomSpace Integration Tests
+ * Tests deep integration between Agent-Zero and OpenCog AtomSpace/cogutil
+ * Part of AZ-INT-001: Create comprehensive integration tests
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <memory>
+#include <vector>
+#include <string>
+
+#include "../framework/TestFramework.h"
+#include "../mocks/MockObjects.h"
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/base/Link.h>
+#include <opencog/atoms/atom_types/types.h>
+#include <opencog/atoms/value/FloatValue.h>
+#include <opencog/atoms/value/LinkValue.h>
+#include <opencog/atoms/truthvalue/SimpleTruthValue.h>
+#include <opencog/util/Logger.h>
+#include <opencog/util/Config.h>
+
+using namespace opencog;
+using namespace opencog::agentzero;
+using namespace opencog::agentzero::test;
+using namespace opencog::agentzero::test::mocks;
+
+/**
+ * AtomSpace Integration Test Suite
+ * Comprehensive tests for AtomSpace and cogutil integration with Agent-Zero
+ */
+class AtomSpaceIntegrationTest : public IntegrationTestFramework
+{
+private:
+    std::unique_ptr<MockKnowledgeIntegrator> _knowledge_integrator;
+
+public:
+    void setUp() override
+    {
+        IntegrationTestFramework::setUp();
+        _knowledge_integrator = std::make_unique<MockKnowledgeIntegrator>(getTestAtomSpace());
+        logger().set_level(Logger::INFO);
+    }
+
+    void tearDown() override
+    {
+        _knowledge_integrator.reset();
+        IntegrationTestFramework::tearDown();
+    }
+
+    /**
+     * Test 1: Basic AtomSpace Operations
+     * Verifies fundamental AtomSpace operations work correctly
+     */
+    void test_Basic_AtomSpace_Operations()
+    {
+        startTestTimer("basic_atomspace_ops");
+        
+        // Create nodes
+        Handle node1 = createTestAtom(CONCEPT_NODE, "TestConcept1");
+        Handle node2 = createTestAtom(CONCEPT_NODE, "TestConcept2");
+        
+        TS_ASSERT(node1 != Handle::UNDEFINED);
+        TS_ASSERT(node2 != Handle::UNDEFINED);
+        TS_ASSERT(getTestAtomSpace()->is_valid_handle(node1));
+        TS_ASSERT(getTestAtomSpace()->is_valid_handle(node2));
+        
+        // Create link
+        HandleSeq outgoing = {node1, node2};
+        Handle link = getTestAtomSpace()->add_link(INHERITANCE_LINK, outgoing);
+        TS_ASSERT(link != Handle::UNDEFINED);
+        
+        // Verify structure
+        TS_ASSERT_EQUALS(link->get_arity(), 2);
+        TS_ASSERT_EQUALS(link->getOutgoingAtom(0), node1);
+        TS_ASSERT_EQUALS(link->getOutgoingAtom(1), node2);
+        
+        // Test atom retrieval
+        Handle retrieved = getTestAtomSpace()->get_handle(CONCEPT_NODE, "TestConcept1");
+        TS_ASSERT_EQUALS(retrieved, node1);
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+    }
+
+    /**
+     * Test 2: TruthValue Integration
+     * Tests TruthValue operations for representing uncertainty
+     */
+    void test_TruthValue_Integration()
+    {
+        startTestTimer("truthvalue_integration");
+        
+        // Create atom with truth value
+        Handle atom = createTestAtom(CONCEPT_NODE, "UncertainConcept");
+        
+        // Set truth value
+        TruthValuePtr tv = SimpleTruthValue::createTV(0.8, 0.9);
+        atom->setTruthValue(tv);
+        
+        // Verify truth value
+        TruthValuePtr retrieved_tv = atom->getTruthValue();
+        TS_ASSERT(retrieved_tv != nullptr);
+        TS_ASSERT_DELTA(retrieved_tv->get_mean(), 0.8, 0.001);
+        TS_ASSERT_DELTA(retrieved_tv->get_confidence(), 0.9, 0.001);
+        
+        // Test truth value updates
+        TruthValuePtr updated_tv = SimpleTruthValue::createTV(0.9, 0.95);
+        atom->setTruthValue(updated_tv);
+        
+        TruthValuePtr final_tv = atom->getTruthValue();
+        TS_ASSERT_DELTA(final_tv->get_mean(), 0.9, 0.001);
+        TS_ASSERT_DELTA(final_tv->get_confidence(), 0.95, 0.001);
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 3: Value Attachments
+     * Tests attaching and retrieving values from atoms
+     */
+    void test_Value_Attachments()
+    {
+        startTestTimer("value_attachments");
+        
+        Handle atom = createTestAtom(CONCEPT_NODE, "ValueAttachTest");
+        
+        // Attach float value using OpenCog FloatValue API
+        std::vector<double> float_data = {1.0, 2.0, 3.0, 4.0, 5.0};
+        ProtoAtomPtr float_value = createFloatValue(float_data);
+        Handle key_atom = createTestAtom(PREDICATE_NODE, "scores");
+        atom->setValue(key_atom, float_value);
+        
+        // Retrieve and verify
+        ValuePtr retrieved = atom->getValue(key_atom);
+        TS_ASSERT(retrieved != nullptr);
+        
+        if (retrieved != nullptr) {
+            FloatValuePtr fv = FloatValueCast(retrieved);
+            TS_ASSERT(fv != nullptr);
+            if (fv != nullptr) {
+                TS_ASSERT_EQUALS(fv->value().size(), 5);
+                TS_ASSERT_DELTA(fv->value()[0], 1.0, 0.001);
+                TS_ASSERT_DELTA(fv->value()[4], 5.0, 0.001);
+            }
+        }
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 4: Atom Type Hierarchy
+     * Tests working with OpenCog's type system
+     */
+    void test_Atom_Type_Hierarchy()
+    {
+        startTestTimer("type_hierarchy");
+        
+        // Create atoms of different types
+        Handle concept = createTestAtom(CONCEPT_NODE, "ConceptType");
+        Handle predicate = createTestAtom(PREDICATE_NODE, "PredicateType");
+        Handle schema = createTestAtom(SCHEMA_NODE, "SchemaType");
+        
+        // Verify types
+        TS_ASSERT_EQUALS(concept->get_type(), CONCEPT_NODE);
+        TS_ASSERT_EQUALS(predicate->get_type(), PREDICATE_NODE);
+        TS_ASSERT_EQUALS(schema->get_type(), SCHEMA_NODE);
+        
+        // Test type hierarchy queries
+        TS_ASSERT(nameserver().isA(CONCEPT_NODE, NODE));
+        TS_ASSERT(nameserver().isA(PREDICATE_NODE, NODE));
+        TS_ASSERT(nameserver().isA(INHERITANCE_LINK, LINK));
+        
+        // Test type compatibility
+        HandleSeq outgoing = {concept, predicate};
+        Handle link = getTestAtomSpace()->add_link(LIST_LINK, outgoing);
+        TS_ASSERT(link != Handle::UNDEFINED);
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 5: Pattern Matching Integration
+     * Tests basic pattern matching capabilities
+     */
+    void test_Pattern_Matching_Integration()
+    {
+        startTestTimer("pattern_matching");
+        
+        // Create knowledge structure
+        Handle cat = createTestAtom(CONCEPT_NODE, "cat");
+        Handle animal = createTestAtom(CONCEPT_NODE, "animal");
+        Handle dog = createTestAtom(CONCEPT_NODE, "dog");
+        
+        HandleSeq inh1_outgoing = {cat, animal};
+        Handle inh1 = getTestAtomSpace()->add_link(INHERITANCE_LINK, inh1_outgoing);
+        
+        HandleSeq inh2_outgoing = {dog, animal};
+        Handle inh2 = getTestAtomSpace()->add_link(INHERITANCE_LINK, inh2_outgoing);
+        
+        // Query: find all things that inherit from animal
+        HandleSeq incoming = animal->getIncomingSet();
+        TS_ASSERT_EQUALS(incoming.size(), 2);
+        
+        // Verify both inheritance links are found
+        bool found_cat = false;
+        bool found_dog = false;
+        for (const auto& link : incoming) {
+            if (link->getOutgoingAtom(0) == cat) found_cat = true;
+            if (link->getOutgoingAtom(0) == dog) found_dog = true;
+        }
+        TS_ASSERT(found_cat);
+        TS_ASSERT(found_dog);
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 6: Knowledge Integration via KnowledgeIntegrator
+     * Tests the knowledge integrator's AtomSpace operations
+     */
+    void test_Knowledge_Integration_Operations()
+    {
+        startTestTimer("knowledge_integration_ops");
+        
+        // Create semantic network
+        Handle concept_a = createTestAtom(CONCEPT_NODE, "KnowledgeA");
+        Handle concept_b = createTestAtom(CONCEPT_NODE, "KnowledgeB");
+        Handle concept_c = createTestAtom(CONCEPT_NODE, "KnowledgeC");
+        
+        // Create relationships
+        HandleSeq rel1 = {concept_a, concept_b};
+        Handle link1 = getTestAtomSpace()->add_link(INHERITANCE_LINK, rel1);
+        
+        HandleSeq rel2 = {concept_b, concept_c};
+        Handle link2 = getTestAtomSpace()->add_link(INHERITANCE_LINK, rel2);
+        
+        // Integrate knowledge
+        TS_ASSERT(_knowledge_integrator->integrateKnowledge(link1));
+        TS_ASSERT(_knowledge_integrator->integrateKnowledge(link2));
+        
+        // Query for transitive relationships
+        HandleSeq results = _knowledge_integrator->queryKnowledge(concept_a);
+        TS_ASSERT(!results.empty());
+        
+        // Verify knowledge base state
+        TS_ASSERT(getAtomSpaceSize() >= 5); // 3 concepts + 2 links
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+    }
+
+    /**
+     * Test 7: AtomSpace Bulk Operations
+     * Tests performance with large numbers of atoms
+     */
+    void test_AtomSpace_Bulk_Operations()
+    {
+        startTestTimer("bulk_operations");
+        
+        // Create many atoms efficiently
+        std::vector<Handle> atoms;
+        atoms.reserve(1000);
+        
+        for (int i = 0; i < 1000; ++i) {
+            Handle atom = createTestAtom(CONCEPT_NODE, "BulkAtom_" + std::to_string(i));
+            atoms.push_back(atom);
+        }
+        
+        TS_ASSERT_EQUALS(atoms.size(), 1000);
+        TS_ASSERT(getAtomSpaceSize() >= 1000);
+        
+        // Create links between atoms
+        for (size_t i = 0; i < atoms.size() - 1; ++i) {
+            HandleSeq outgoing = {atoms[i], atoms[i + 1]};
+            Handle link = getTestAtomSpace()->add_link(LIST_LINK, outgoing);
+            TS_ASSERT(link != Handle::UNDEFINED);
+        }
+        
+        // Verify integrity after bulk operations
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 8: Attention Allocation Integration
+     * Tests STI (Short-Term Importance) values for attention
+     */
+    void test_Attention_Allocation_Integration()
+    {
+        startTestTimer("attention_allocation");
+        
+        // Create atoms with different importance
+        Handle important = createTestAtom(CONCEPT_NODE, "ImportantConcept");
+        Handle normal = createTestAtom(CONCEPT_NODE, "NormalConcept");
+        Handle unimportant = createTestAtom(CONCEPT_NODE, "UnimportantConcept");
+        
+        // Set STI values (attention values)
+        important->setSTI(100);
+        normal->setSTI(50);
+        unimportant->setSTI(10);
+        
+        // Verify STI values
+        TS_ASSERT_EQUALS(important->getSTI(), 100);
+        TS_ASSERT_EQUALS(normal->getSTI(), 50);
+        TS_ASSERT_EQUALS(unimportant->getSTI(), 10);
+        
+        // Test attention ordering
+        TS_ASSERT(important->getSTI() > normal->getSTI());
+        TS_ASSERT(normal->getSTI() > unimportant->getSTI());
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 9: AtomSpace Filtering and Queries
+     * Tests filtering atoms by various criteria
+     */
+    void test_AtomSpace_Filtering_Queries()
+    {
+        startTestTimer("filtering_queries");
+        
+        // Create diverse atom types
+        createTestAtom(CONCEPT_NODE, "QueryTest1");
+        createTestAtom(CONCEPT_NODE, "QueryTest2");
+        createTestAtom(PREDICATE_NODE, "QueryTest3");
+        createTestAtom(SCHEMA_NODE, "QueryTest4");
+        
+        // Get all atoms of specific type
+        HandleSeq all_atoms;
+        getTestAtomSpace()->get_handles_by_type(all_atoms, CONCEPT_NODE);
+        
+        // Should find at least the 2 concept nodes we created
+        int concept_count = 0;
+        for (const auto& atom : all_atoms) {
+            if (atom->get_type() == CONCEPT_NODE) {
+                concept_count++;
+            }
+        }
+        TS_ASSERT(concept_count >= 2);
+        
+        // Test name-based retrieval
+        Handle found = getTestAtomSpace()->get_handle(CONCEPT_NODE, "QueryTest1");
+        TS_ASSERT(found != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(found->get_name(), "QueryTest1");
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 10: AtomSpace Transaction-like Behavior
+     * Tests atomic operations and consistency
+     */
+    void test_AtomSpace_Atomic_Operations()
+    {
+        startTestTimer("atomic_operations");
+        
+        size_t initial_size = getAtomSpaceSize();
+        
+        // Batch of related operations
+        Handle context = createTestAtom(CONCEPT_NODE, "TransactionContext");
+        
+        std::vector<Handle> batch_atoms;
+        for (int i = 0; i < 10; ++i) {
+            Handle atom = createTestAtom(CONCEPT_NODE, "BatchAtom_" + std::to_string(i));
+            batch_atoms.push_back(atom);
+            
+            // Link each to context
+            HandleSeq outgoing = {atom, context};
+            getTestAtomSpace()->add_link(MEMBER_LINK, outgoing);
+        }
+        
+        // Verify all operations completed
+        TS_ASSERT_EQUALS(batch_atoms.size(), 10);
+        
+        // Verify context has all members
+        HandleSeq incoming = context->getIncomingSet();
+        TS_ASSERT_EQUALS(incoming.size(), 10);
+        
+        // Verify AtomSpace size increased correctly
+        size_t final_size = getAtomSpaceSize();
+        TS_ASSERT(final_size >= initial_size + 21); // 1 context + 10 atoms + 10 links
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+    }
+
+    /**
+     * Test 11: Logger Integration (cogutil)
+     * Tests OpenCog logger integration
+     */
+    void test_Logger_Integration()
+    {
+        startTestTimer("logger_integration");
+        
+        // Test different log levels
+        logger().debug("Debug message from integration test");
+        logger().info("Info message from integration test");
+        logger().warn("Warning message from integration test");
+        logger().error("Error message from integration test");
+        
+        // Test conditional logging
+        if (logger().is_debug_enabled()) {
+            logger().debug("Debug is enabled");
+        }
+        
+        if (logger().is_info_enabled()) {
+            logger().info("Info is enabled");
+        }
+        
+        // Logger should not crash or cause issues
+        TS_ASSERT(true);
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 12: AtomSpace Memory Management
+     * Tests proper cleanup and memory management
+     */
+    void test_AtomSpace_Memory_Management()
+    {
+        startTestTimer("memory_management");
+        
+        size_t initial_size = getAtomSpaceSize();
+        
+        // Create and delete atoms
+        {
+            Handle temp1 = createTestAtom(CONCEPT_NODE, "TempAtom1");
+            Handle temp2 = createTestAtom(CONCEPT_NODE, "TempAtom2");
+            
+            TS_ASSERT(temp1 != Handle::UNDEFINED);
+            TS_ASSERT(temp2 != Handle::UNDEFINED);
+            
+            // Atoms are now in AtomSpace
+            TS_ASSERT(getAtomSpaceSize() > initial_size);
+        }
+        
+        // Atoms persist after scope exit (AtomSpace owns them)
+        TS_ASSERT(getAtomSpaceSize() > initial_size);
+        
+        // Clear AtomSpace
+        clearAtomSpace();
+        TS_ASSERT_EQUALS(getAtomSpaceSize(), 0);
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 13: Complex Graph Structures
+     * Tests building and querying complex graph structures
+     */
+    void test_Complex_Graph_Structures()
+    {
+        startTestTimer("complex_graphs");
+        
+        // Build a simple semantic network
+        Handle person = createTestAtom(CONCEPT_NODE, "Person");
+        Handle john = createTestAtom(CONCEPT_NODE, "John");
+        Handle mary = createTestAtom(CONCEPT_NODE, "Mary");
+        Handle friend_rel = createTestAtom(PREDICATE_NODE, "friend");
+        
+        // John is a Person
+        HandleSeq john_is_person = {john, person};
+        getTestAtomSpace()->add_link(INHERITANCE_LINK, john_is_person);
+        
+        // Mary is a Person
+        HandleSeq mary_is_person = {mary, person};
+        getTestAtomSpace()->add_link(INHERITANCE_LINK, mary_is_person);
+        
+        // John is friend of Mary
+        HandleSeq friendship = {john, mary};
+        Handle friendship_link = getTestAtomSpace()->add_link(LIST_LINK, friendship);
+        HandleSeq eval_outgoing = {friend_rel, friendship_link};
+        getTestAtomSpace()->add_link(EVALUATION_LINK, eval_outgoing);
+        
+        // Query: find all people
+        HandleSeq people_incoming = person->getIncomingSet();
+        TS_ASSERT_EQUALS(people_incoming.size(), 2);
+        
+        // Query: find John's relationships
+        HandleSeq john_incoming = john->getIncomingSet();
+        TS_ASSERT(john_incoming.size() >= 2); // inheritance + friendship structure
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+    }
+
+    /**
+     * Test 14: Concurrent Access Safety
+     * Tests that AtomSpace handles concurrent access correctly
+     */
+    void test_Concurrent_Access_Safety()
+    {
+        startTestTimer("concurrent_access");
+        
+        // Sequential operations simulating potential race conditions
+        Handle shared_atom = createTestAtom(CONCEPT_NODE, "SharedAtom");
+        
+        // Multiple "threads" updating truth values
+        for (int i = 0; i < 100; ++i) {
+            double strength = static_cast<double>(i) / 100.0;
+            TruthValuePtr tv = SimpleTruthValue::createTV(strength, 0.9);
+            shared_atom->setTruthValue(tv);
+        }
+        
+        // Verify final state is consistent
+        TruthValuePtr final_tv = shared_atom->getTruthValue();
+        TS_ASSERT(final_tv != nullptr);
+        TS_ASSERT_DELTA(final_tv->get_mean(), 0.99, 0.01);
+        
+        // AtomSpace should remain consistent
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+    }
+
+    /**
+     * Test 15: Integration with Agent-Zero Specific Types
+     * Tests custom atom types used by Agent-Zero
+     */
+    void test_AgentZero_Specific_Types()
+    {
+        startTestTimer("agentzero_types");
+        
+        // Create Agent-Zero specific structures
+        Handle agent_self = createTestAtom(CONCEPT_NODE, "AgentSelf_TestAgent");
+        Handle goal = createTestAtom(CONCEPT_NODE, "Goal_TestGoal");
+        Handle task = createTestAtom(CONCEPT_NODE, "Task_TestTask");
+        
+        // Create goal hierarchy
+        HandleSeq goal_structure = {task, goal};
+        Handle goal_link = getTestAtomSpace()->add_link(MEMBER_LINK, goal_structure);
+        
+        // Link to agent
+        HandleSeq agent_goal = {agent_self, goal};
+        Handle agent_goal_link = getTestAtomSpace()->add_link(EVALUATION_LINK, agent_goal);
+        
+        // Verify structure
+        TS_ASSERT(goal_link != Handle::UNDEFINED);
+        TS_ASSERT(agent_goal_link != Handle::UNDEFINED);
+        
+        // Query agent's goals
+        HandleSeq agent_incoming = agent_self->getIncomingSet();
+        TS_ASSERT(!agent_incoming.empty());
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+    }
+};
