@@ -57,12 +57,10 @@ find_package(Threads REQUIRED)
 # Include path fixup:
 #   Source files use   #include "cog0/Foo.h"
 #   Standalone headers live in the flat include/ directory.
-#   Some are clean (AtomStore.h) and some are the numbered (2) variants
-#   (TaskManager (2).h) — the (2) variants are the standalone versions.
 #
-#   Strategy: create a  <binary-dir>/cog0/  directory and populate it with
-#   symlinks pointing to the correct header in <repo-root>/include/.
-#   Then add <binary-dir> to the compiler include search path.
+#   Strategy: create a  <binary-dir>/cog0_headers/cog0/  directory and
+#   populate it with symlinks pointing to <repo-root>/include/Foo.h.
+#   Then add <binary-dir>/cog0_headers to the compiler include search path.
 #
 # Resolve the repository root regardless of whether the build is configured
 # from the repo root (cmake -S .) or from this standalone directory
@@ -78,7 +76,8 @@ endif()
 set(COG0_GENERATED_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/cog0_headers")
 file(MAKE_DIRECTORY "${COG0_GENERATED_INCLUDE}/cog0")
 
-# Headers whose clean name in include/ is already the standalone version
+# All standalone headers now live directly in include/ as clean names.
+# (The former "(2)" duplicates have been consolidated into the clean files.)
 foreach(_h
     AtomStore
     Logger
@@ -87,17 +86,6 @@ foreach(_h
     RaftConsensus
     ConflictResolver
     MonitoringServer
-)
-    file(CREATE_LINK
-        "${COG0_ROOT_INCLUDE_DIR}/${_h}.h"
-        "${COG0_GENERATED_INCLUDE}/cog0/${_h}.h"
-        SYMBOLIC
-    )
-endforeach()
-
-# Headers where the clean name is the OpenCog version;
-# the standalone version is the "(2)" file.
-foreach(_h
     TaskManager
     ReasoningEngine
     CognitiveLoop
@@ -111,7 +99,7 @@ foreach(_h
     AttentionManager
 )
     file(CREATE_LINK
-        "${COG0_ROOT_INCLUDE_DIR}/${_h} (2).h"
+        "${COG0_ROOT_INCLUDE_DIR}/${_h}.h"
         "${COG0_GENERATED_INCLUDE}/cog0/${_h}.h"
         SYMBOLIC
     )

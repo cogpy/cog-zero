@@ -1,262 +1,139 @@
 /*
- * opencog/agentzero/CognitiveLoop.h
+ * standalone/include/cog0/CognitiveLoop.h
  *
  * Copyright (C) 2024 OpenCog Foundation
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Cognitive Loop Implementation
- * Implements perception-action-reflection cycle with AtomSpace integration
- * Part of the AGENT-ZERO-GENESIS project
+ * Perception → Attention → Reasoning → Planning → Action → Reflection cycle
+ * for the standalone cog0 agent.
  */
 
-#ifndef _OPENCOG_AGENTZERO_COGNITIVE_LOOP_H
-#define _OPENCOG_AGENTZERO_COGNITIVE_LOOP_H
+#pragma once
 
-#include <memory>
-#include <thread>
 #include <atomic>
 #include <chrono>
+#include <functional>
+#include <memory>
+#include <string>
+#include <thread>
+#include <unordered_set>
+#include <vector>
 
-#include <opencog/atomspace/AtomSpace.h>
-#include <opencog/atoms/base/Handle.h>
-#include <opencog/util/Logger.h>
+#include "AtomStore.h"
+#include "TaskManager.h"
+#include "ReasoningEngine.h"
 
-// Forward declarations for attention system
-namespace opencog {
-    class AttentionBank;
-    class AttentionValue;
-    typedef std::shared_ptr<const AttentionValue> AttentionValuePtr;
-}
+namespace cog0 {
 
-namespace opencog {
-namespace agentzero {
+// -----------------------------------------------------------------------
+// PerceptInput — a single percept delivered to the cognitive loop
 
-class AgentZeroCore;
-class ActionExecutor;
-class ActionScheduler;
-
-/**
- * CognitiveLoop - Implements the basic perception-action-reflection cycle
- *
- * This class manages the cognitive processing cycle for Agent-Zero,
- * integrating with AtomSpace for state representation and providing
- * a foundation for more complex cognitive behaviors.
- *
- * Cycle phases:
- * 1. Perception - Process sensory input and update world model
- * 2. Planning - Analyze goals and generate action plans
- * 3. Action - Execute selected actions in the environment
- * 4. Reflection - Learn from outcomes and update knowledge
- */
-class CognitiveLoop
-{
-private:
-    // Core references
-    AgentZeroCore* _agent_core;
-    AtomSpacePtr _atomspace;
-    
-    // Action execution components
-    std::shared_ptr<ActionExecutor> _action_executor;
-    std::shared_ptr<ActionScheduler> _action_scheduler;
-    
-    // Loop control
-    std::atomic<bool> _running;
-    std::atomic<bool> _paused;
-    std::unique_ptr<std::thread> _loop_thread;
-    
-    // Timing
-    std::chrono::milliseconds _cycle_interval;
-    std::atomic<long> _cycle_count;
-    std::atomic<long> _last_cycle_duration_ms;
-    
-    // AtomSpace handles for cognitive state
-    Handle _perception_context;
-    Handle _planning_context;
-    Handle _action_context;
-    Handle _reflection_context;
-    
-    // Configuration
-    bool _enable_perception;
-    bool _enable_planning;
-    bool _enable_action;
-    bool _enable_reflection;
-    bool _enable_attention_allocation;
-    
-    // Attention system integration
-    AttentionBank* _attention_bank;
-    Handle _attention_context;
-    double _perception_importance_threshold;
-    double _attention_spreading_factor;
-    
-    // Internal methods
-    void runMainLoop();
-    bool executePerceptionPhase();
-    bool executePlanningPhase();
-    bool executeActionPhase();
-    bool executeReflectionPhase();
-    void updateCycleMetrics(const std::chrono::steady_clock::time_point& start_time);
-    void handleLoopException(const std::exception& e);
-    
-    // Attention allocation methods
-    void initializeAttentionSystem();
-    void allocateAttentionToPercepts(const HandleSeq& percepts);
-    void updateAttentionContext();
-    HandleSeq getHighImportanceAtoms(double threshold = -1.0) const;
-
-public:
-    /**
-     * Constructor
-     * @param agent_core Pointer to the parent AgentZeroCore instance
-     * @param atomspace Shared pointer to the AtomSpace
-     */
-    CognitiveLoop(AgentZeroCore* agent_core, AtomSpacePtr atomspace);
-    
-    /**
-     * Destructor - ensures loop is stopped and cleaned up
-     */
-    ~CognitiveLoop();
-    
-    // Loop control
-    /**
-     * Start the cognitive loop in a separate thread
-     * @return true if successfully started
-     */
-    bool start();
-    
-    /**
-     * Stop the cognitive loop and wait for thread completion
-     * @return true if successfully stopped
-     */
-    bool stop();
-    
-    /**
-     * Pause the cognitive loop (can be resumed)
-     * @return true if successfully paused
-     */
-    bool pause();
-    
-    /**
-     * Resume a paused cognitive loop
-     * @return true if successfully resumed
-     */
-    bool resume();
-    
-    /**
-     * Execute a single cognitive cycle manually
-     * @return true if cycle completed successfully
-     */
-    bool executeSingleCycle();
-    
-    // State queries
-    /**
-     * Check if the loop is currently running
-     * @return true if running
-     */
-    bool isRunning() const { return _running.load(); }
-    
-    /**
-     * Check if the loop is currently paused
-     * @return true if paused
-     */
-    bool isPaused() const { return _paused.load(); }
-    
-    /**
-     * Get the current cycle count
-     * @return number of completed cycles
-     */
-    long getCycleCount() const { return _cycle_count.load(); }
-    
-    /**
-     * Get the duration of the last cycle in milliseconds
-     * @return last cycle duration
-     */
-    long getLastCycleDuration() const { return _last_cycle_duration_ms.load(); }
-    
-    // Configuration
-    /**
-     * Set the cycle interval
-     * @param interval_ms Interval between cycles in milliseconds
-     */
-    void setCycleInterval(int interval_ms) { 
-        _cycle_interval = std::chrono::milliseconds(interval_ms); 
-    }
-    
-    /**
-     * Get the current cycle interval
-     * @return cycle interval in milliseconds
-     */
-    int getCycleInterval() const { 
-        return static_cast<int>(_cycle_interval.count()); 
-    }
-    
-    /**
-     * Enable or disable specific cognitive phases
-     * @param perception Enable perception phase
-     * @param planning Enable planning phase
-     * @param action Enable action phase
-     * @param reflection Enable reflection phase
-     */
-    void configurePhases(bool perception, bool planning, bool action, bool reflection);
-    
-    /**
-     * Configure attention allocation for perception phase
-     * @param enable Enable/disable attention allocation
-     * @param importance_threshold Minimum importance threshold for attention
-     * @param spreading_factor Factor for attention spreading (0.0-1.0)
-     */
-    void configureAttention(bool enable, double importance_threshold = 0.5, double spreading_factor = 0.1);
-    
-    // AtomSpace integration
-    /**
-     * Get the perception context atom
-     * @return Handle to perception context
-     */
-    Handle getPerceptionContext() const { return _perception_context; }
-    
-    /**
-     * Get the planning context atom
-     * @return Handle to planning context
-     */
-    Handle getPlanningContext() const { return _planning_context; }
-    
-    /**
-     * Get the action context atom
-     * @return Handle to action context
-     */
-    Handle getActionContext() const { return _action_context; }
-    
-    /**
-     * Get the reflection context atom
-     * @return Handle to reflection context
-     */
-    Handle getReflectionContext() const { return _reflection_context; }
-    
-    /**
-     * Get the attention context atom
-     * @return Handle to attention context
-     */
-    Handle getAttentionContext() const { return _attention_context; }
-    
-    /**
-     * Get the action executor component
-     * @return shared pointer to ActionExecutor
-     */
-    std::shared_ptr<ActionExecutor> getActionExecutor() const { return _action_executor; }
-    
-    /**
-     * Get the action scheduler component
-     * @return shared pointer to ActionScheduler
-     */
-    std::shared_ptr<ActionScheduler> getActionScheduler() const { return _action_scheduler; }
-    
-    /**
-     * Get status information for debugging
-     * @return JSON string with status details
-     */
-    std::string getStatusInfo() const;
+struct PerceptInput {
+    std::string source;     // e.g. "stdin", "sensor-1", "api"
+    std::string modality;   // e.g. "text", "numeric", "event"
+    std::string content;    // raw content string
+    double      salience = 0.5; // attention priority [0,1]
 };
 
-} // namespace agentzero
-} // namespace opencog
+// -----------------------------------------------------------------------
+// CycleStats — metrics for a single cognitive cycle
 
-#endif // _OPENCOG_AGENTZERO_COGNITIVE_LOOP_H
+struct CycleStats {
+    size_t cycleNumber    = 0;
+    size_t perceptsAdded  = 0;
+    size_t rulesFired     = 0;
+    size_t tasksExecuted  = 0;
+    std::chrono::milliseconds duration{0};
+};
+
+// -----------------------------------------------------------------------
+// CognitiveLoop
+
+class CognitiveLoop {
+public:
+    // Callback types for cycle hooks
+    using PerceptionHook   = std::function<void(const PerceptInput&, AtomStore&)>;
+    using ReflectionHook   = std::function<void(const CycleStats&)>;
+
+    CognitiveLoop(std::shared_ptr<AtomStore>     store,
+                  std::shared_ptr<TaskManager>   taskMgr,
+                  std::shared_ptr<ReasoningEngine> reasoning);
+
+    ~CognitiveLoop();
+
+    // --- Configuration ---
+    void setCycleInterval(std::chrono::milliseconds ms) { _cycleInterval = ms; }
+    void setMaxCycles(size_t n) { _maxCycles = n; } // 0 = unlimited
+    void setMaxTasksPerCycle(size_t n) { _maxTasksPerCycle = n; } // tasks executed per cycle
+    void enablePhase(bool perception, bool reasoning, bool planning,
+                     bool action, bool reflection);
+
+    // --- Percept injection (thread-safe) ---
+    void addPercept(PerceptInput p);
+
+    // --- Hooks ---
+    void setPerceptionHook(PerceptionHook h) { _perceptionHook = std::move(h); }
+    void setReflectionHook(ReflectionHook h) { _reflectionHook = std::move(h); }
+
+    // --- Lifecycle ---
+    void start();              // Start background loop thread
+    void stop();               // Stop loop (waits for thread)
+    void runSingleCycle();     // Run one synchronous cycle (useful for testing)
+    [[nodiscard]] bool isRunning() const { return _running.load(); }
+
+    // --- Stats ---
+    [[nodiscard]] size_t cycleCount() const { return _cycleCount.load(); }
+    [[nodiscard]] CycleStats lastStats() const { return _lastStats; }
+
+private:
+    void loopBody();
+
+    // Cognitive phases
+    size_t  phasePerception();          // add percepts to AtomStore
+    size_t  phaseReasoning();           // run inference rules
+    size_t  phasePlanning();            // update task priorities
+    size_t  phaseAction();              // execute pending tasks
+    void    phaseReflection(const CycleStats& stats); // meta-analysis
+
+    std::shared_ptr<AtomStore>      _store;
+    std::shared_ptr<TaskManager>    _taskMgr;
+    std::shared_ptr<ReasoningEngine> _reasoning;
+
+    // Percept queue (protected by mutex)
+    std::mutex              _perceptMutex;
+    std::vector<PerceptInput> _perceptQueue;
+
+    // Control
+    std::atomic<bool>   _running{false};
+    std::atomic<size_t> _cycleCount{0};
+    size_t              _maxCycles      = 0;
+    std::chrono::milliseconds _cycleInterval{1000};
+    std::thread         _loopThread;
+
+    // Reflection bookkeeping — track previous cycle atoms so they can be
+    // removed before recording the next cycle, preventing unbounded growth.
+    Handle _prevCycleNode;
+    Handle _prevDurationNode;
+    Handle _prevStateLink;
+
+    // Planning bookkeeping — track which tasks have already been promoted
+    // to prevent per-cycle escalation (each task gets at most one boost).
+    std::unordered_set<size_t> _promotedTaskIds;
+
+    // Phase flags
+    bool _enablePerception  = true;
+    bool _enableReasoning   = true;
+    bool _enablePlanning    = true;
+    bool _enableAction      = true;
+    bool _enableReflection  = true;
+
+    size_t _maxTasksPerCycle = 3; // configurable via setMaxTasksPerCycle()
+
+    // Hooks
+    PerceptionHook  _perceptionHook;
+    ReflectionHook  _reflectionHook;
+
+    CycleStats _lastStats;
+};
+
+} // namespace cog0
