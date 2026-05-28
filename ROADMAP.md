@@ -209,7 +209,7 @@ protocols, agent migration across nodes, and a real-time monitoring dashboard.
 
 ### Tasks
 - [x] **Distributed consensus** — implement Raft-based leader election as an alternative to the current lightweight consensus protocol in `MultiAgentCoordinator` (`include/RaftConsensus.h`, `src/RaftConsensus.cpp`): in-process simulation via `RaftCluster` message bus; full leader election, log replication, and network-partition handling; pure C++17/stdlib — zero external deps
-- [ ] **Agent migration** — live hand-off of agent state and active tasks between cluster nodes (`ClusterManager` extension) *(deferred to Phase 14)*
+- [x] **Agent migration** — live hand-off of agent state and active tasks between cluster nodes (`ClusterManager` extension) *(completed in Phase 14)*
 - [x] **Priority-based conflict resolution** — `ConflictResolver` (`include/ConflictResolver.h`, `src/ConflictResolver.cpp`): three strategies — `STRICT_PRIORITY`, `FAIRNESS_WEIGHTED` (anti-starvation via wait-time boost), and `SLA_PRIORITY` (EDF-inspired deadline urgency); resource-conflict detection; `ranked()` view
 - [x] **Real-time monitoring dashboard** — `MonitoringServer` (`include/MonitoringServer.h`, `src/MonitoringServer.cpp`): lightweight HTTP/1.1 server (POSIX sockets, no external deps); endpoints `/health`, `/metrics`, `/atoms`, `/attention`; `AgentMetrics` snapshot API; extra-metrics hook for application-specific counters
 - [x] **Structured logging** — `Logger` enhanced with JSON-lines mode (`setJsonMode(true)`), custom output sink (`setSink(ostream*)`), and `logJson(level, msg, fields)` for structured key/value logging compatible with ELK/Loki/Datadog pipelines
@@ -217,9 +217,10 @@ protocols, agent migration across nodes, and a real-time monitoring dashboard.
 
 ### New test coverage
 - `tests/test_phase12.cpp` — 25 tests covering Logger JSON mode, ConflictResolver all three strategies, Raft 3-node and 5-node election, MonitoringServer snapshot and lifecycle
+- `tests/test_phase14_migration.cpp` — 29 tests covering Agent serialize/deserialize roundtrip, migration protocol, state preservation, and error handling
 - `tests/test_action_executor_cog0.cpp` — 8 standalone ActionExecutor unit tests
 - `tests/test_action_scheduler_cog0.cpp` — 8 standalone ActionScheduler unit tests
-- Total: **161 tests, 0 failures** across 7 CTest targets (unit, e2e, integration×2, regression, benchmark×2)
+- Total: **190 tests, 0 failures** across 12 CTest targets (unit, e2e, integration×3, regression, benchmark×2, fuzz×2, phase14_migration, phase14_websocket)
 
 ---
 
@@ -245,9 +246,9 @@ labelled unit, e2e, integration, and benchmark test stages.
 Complete the remaining Phase 12 deferred items plus new production-readiness work.
 
 ### Tasks
-- [ ] **Agent migration** — live hand-off of agent state and active tasks between cluster nodes (`ClusterManager` extension)
+- [x] **Agent migration** — live hand-off of agent state and active tasks between cluster nodes; implemented `Agent::serialize()` / `Agent::deserialize()` for full state roundtrip (atoms, goals, tasks, episodes); added `ClusterManager::initiateMigration()` / `receiveMigration()` / `getMigrationStatus()` for distributed migration protocol; 29 migration tests covering serialization roundtrip, state preservation, and error handling
 - [ ] **gRPC agent interface** — replace the current CogServer TCP protocol with a typed gRPC API for inter-module communication (requires external `grpc` dependency)
-- [ ] **WebSocket monitoring dashboard** — upgrade `MonitoringServer` with a WebSocket upgrade path for real-time push metrics and a minimal HTML/JS frontend served at `/dashboard`
+- [x] **WebSocket monitoring dashboard** — upgrade `MonitoringServer` with a WebSocket upgrade path for real-time push metrics and a minimal HTML/JS frontend served at `/dashboard`; implemented `WebSocketHandler` (RFC 6455 frame encoding/decoding, SHA-1, Base64), `DashboardAssets` (self-contained responsive HTML/JS), integrated WebSocket client management and periodic metrics broadcast
 - [ ] **Persistent Raft log** — add RocksDB-backed log persistence to `RaftNode` so leader state survives restarts
 - [ ] **TLS for MonitoringServer** — optional TLS via mbedTLS or OpenSSL for secure metric scraping in production deployments
 - [x] **ToolWrapper stub completions** — replace placeholder implementations in `ToolWrapper.cpp` with functional code for REST API (POSIX sockets), Python script (popen), and shell command execution; added security validation and output size limits
