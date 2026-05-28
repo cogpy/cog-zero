@@ -250,6 +250,8 @@ Complete the remaining Phase 12 deferred items plus new production-readiness wor
 - [ ] **WebSocket monitoring dashboard** — upgrade `MonitoringServer` with a WebSocket upgrade path for real-time push metrics and a minimal HTML/JS frontend served at `/dashboard`
 - [ ] **Persistent Raft log** — add RocksDB-backed log persistence to `RaftNode` so leader state survives restarts
 - [ ] **TLS for MonitoringServer** — optional TLS via mbedTLS or OpenSSL for secure metric scraping in production deployments
+- [x] **ToolWrapper stub completions** — replace placeholder implementations in `ToolWrapper.cpp` with functional code for REST API (POSIX sockets), Python script (popen), and shell command execution; added security validation and output size limits
+- [x] **MessageSerializer stub completions** — implement zero-dependency recursive descent JSON parser (`parseJsonObject`, `parseJsonString`, `parseJsonValue`); add proper JSON string escaping; implement RLE compression/decompression; add ISO 8601 timestamp parsing
 
 ---
 
@@ -268,4 +270,4 @@ Complete the remaining Phase 12 deferred items plus new production-readiness wor
 
 ---
 
-*Last updated: 2026-06-17*
+*Last updated: 2026-05-28

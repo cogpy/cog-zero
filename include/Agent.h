@@ -99,6 +99,10 @@ public:
     // Status / diagnostics
     [[nodiscard]] std::string statusReport() const;
 
+    // Serialization for migration
+    [[nodiscard]] std::string serialize() const;
+    static std::unique_ptr<Agent> deserialize(const std::string& data, AgentConfig cfg = {});
+
 private:
     AgentConfig                      _cfg;
     std::shared_ptr<AtomStore>       _store;

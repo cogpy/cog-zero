@@ -299,3 +299,188 @@ bool ClusterManager::pingNode(const std::string& node_id)
     std::lock_guard<std::mutex> lock(nodes_mutex_);
     return nodes_.find(node_id) != nodes_.end();
 }
+
+// ---------------------------------------------------------------------------
+// Migration API implementation (Phase 14 Feature 2.1)
+// ---------------------------------------------------------------------------
+
+std::string ClusterManager::migrationStatusToString(MigrationStatus status)
+{
+    switch (status) {
+        case MigrationStatus::NONE:        return "none";
+        case MigrationStatus::PENDING:     return "pending";
+        case MigrationStatus::IN_PROGRESS: return "in_progress";
+        case MigrationStatus::COMPLETED:   return "completed";
+        case MigrationStatus::FAILED:      return "failed";
+        default:                           return "unknown";
+    }
+}
+
+bool ClusterManager::initiateMigration(const std::string& sourceNode,
+                                       const std::string& targetNode,
+                                       const std::string& agentId)
+{
+    logger_.info("Initiating migration: agent=%s from=%s to=%s",
+                agentId.c_str(), sourceNode.c_str(), targetNode.c_str());
+
+    // Validate source and target nodes exist
+    {
+        std::lock_guard<std::mutex> lock(nodes_mutex_);
+        if (nodes_.find(sourceNode) == nodes_.end()) {
+            logger_.warn("Migration failed: source node %s not found", 
+                        sourceNode.c_str());
+            return false;
+        }
+        if (nodes_.find(targetNode) == nodes_.end()) {
+            logger_.warn("Migration failed: target node %s not found",
+                        targetNode.c_str());
+            return false;
+        }
+        // Verify nodes are healthy
+        if (!nodes_[sourceNode].health.is_responsive) {
+            logger_.warn("Migration failed: source node %s is unresponsive",
+                        sourceNode.c_str());
+            return false;
+        }
+        if (!nodes_[targetNode].health.is_responsive) {
+            logger_.warn("Migration failed: target node %s is unresponsive",
+                        targetNode.c_str());
+            return false;
+        }
+    }
+
+    // Create migration record
+    {
+        std::lock_guard<std::mutex> lock(migrations_mutex_);
+        
+        // Check if migration already in progress for this agent
+        auto it = migrations_.find(agentId);
+        if (it != migrations_.end() && 
+            (it->second.status == MigrationStatus::PENDING ||
+             it->second.status == MigrationStatus::IN_PROGRESS)) {
+            logger_.warn("Migration failed: agent %s already has migration in progress",
+                        agentId.c_str());
+            return false;
+        }
+
+        MigrationRecord record;
+        record.agentId = agentId;
+        record.sourceNode = sourceNode;
+        record.targetNode = targetNode;
+        record.status = MigrationStatus::PENDING;
+        record.startTime = std::chrono::system_clock::now();
+
+        migrations_[agentId] = record;
+    }
+
+    // Store migration intent in AtomSpace
+    Handle agent_node = atomspace_->add_node(CONCEPT_NODE, "Agent:" + agentId);
+    Handle migration_node = atomspace_->add_node(CONCEPT_NODE, 
+                                                  "Migration:" + agentId);
+    Handle source_node = atomspace_->add_node(CONCEPT_NODE, 
+                                               "ClusterNode:" + sourceNode);
+    Handle target_node = atomspace_->add_node(CONCEPT_NODE,
+                                               "ClusterNode:" + targetNode);
+
+    // Create migration intent link
+    atomspace_->add_link(EVALUATION_LINK, {migration_node, source_node, target_node});
+    atomspace_->add_link(MEMBER_LINK, {agent_node, migration_node});
+
+    logger_.info("Migration initiated successfully for agent %s", agentId.c_str());
+    return true;
+}
+
+bool ClusterManager::receiveMigration(const std::string& serializedState,
+                                      const std::string& sourceNode)
+{
+    if (serializedState.empty()) {
+        logger_.warn("Received empty migration state from %s", sourceNode.c_str());
+        return false;
+    }
+
+    // Extract agent ID from serialized state (simple JSON parsing)
+    std::string agentId;
+    auto namePos = serializedState.find("\"name\":");
+    if (namePos != std::string::npos) {
+        auto start = serializedState.find('"', namePos + 7);
+        if (start != std::string::npos) {
+            auto end = serializedState.find('"', start + 1);
+            if (end != std::string::npos) {
+                agentId = serializedState.substr(start + 1, end - start - 1);
+            }
+        }
+    }
+
+    if (agentId.empty()) {
+        logger_.warn("Could not extract agent ID from serialized state");
+        return false;
+    }
+
+    logger_.info("Receiving migration: agent=%s from=%s", 
+                agentId.c_str(), sourceNode.c_str());
+
+    // Update migration record
+    {
+        std::lock_guard<std::mutex> lock(migrations_mutex_);
+        
+        auto it = migrations_.find(agentId);
+        if (it != migrations_.end()) {
+            it->second.status = MigrationStatus::IN_PROGRESS;
+            it->second.serializedState = serializedState;
+        } else {
+            // Migration initiated externally - create record
+            MigrationRecord record;
+            record.agentId = agentId;
+            record.sourceNode = sourceNode;
+            record.targetNode = cluster_id_;  // Assume this node is the target
+            record.status = MigrationStatus::IN_PROGRESS;
+            record.serializedState = serializedState;
+            record.startTime = std::chrono::system_clock::now();
+            migrations_[agentId] = record;
+        }
+    }
+
+    // Validate the serialized state has required fields
+    bool hasAtoms = serializedState.find("\"atoms\":") != std::string::npos;
+    bool hasGoals = serializedState.find("\"goals\":") != std::string::npos;
+    bool hasTasks = serializedState.find("\"tasks\":") != std::string::npos;
+    bool hasEpisodes = serializedState.find("\"episodes\":") != std::string::npos;
+
+    if (!hasAtoms || !hasGoals || !hasTasks || !hasEpisodes) {
+        logger_.warn("Invalid serialized state: missing required fields");
+        std::lock_guard<std::mutex> lock(migrations_mutex_);
+        if (migrations_.find(agentId) != migrations_.end()) {
+            migrations_[agentId].status = MigrationStatus::FAILED;
+        }
+        return false;
+    }
+
+    // Store migration state in AtomSpace
+    Handle agent_node = atomspace_->add_node(CONCEPT_NODE, "Agent:" + agentId);
+    Handle state_node = atomspace_->add_node(CONCEPT_NODE, 
+                                             "MigratedState:" + agentId);
+    atomspace_->add_link(INHERITANCE_LINK, {state_node, agent_node});
+
+    // Mark migration as completed
+    {
+        std::lock_guard<std::mutex> lock(migrations_mutex_);
+        if (migrations_.find(agentId) != migrations_.end()) {
+            migrations_[agentId].status = MigrationStatus::COMPLETED;
+        }
+    }
+
+    logger_.info("Migration received successfully for agent %s", agentId.c_str());
+    return true;
+}
+
+std::string ClusterManager::getMigrationStatus(const std::string& agentId) const
+{
+    std::lock_guard<std::mutex> lock(migrations_mutex_);
+    
+    auto it = migrations_.find(agentId);
+    if (it == migrations_.end()) {
+        return "none";
+    }
+    
+    return migrationStatusToString(it->second.status);
+}

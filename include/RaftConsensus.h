@@ -49,6 +49,9 @@
 
 namespace cog0 {
 
+// Forward declaration for pluggable log store
+class RaftLogStore;
+
 // =========================================================================
 // Raft protocol roles
 // =========================================================================
@@ -114,6 +117,9 @@ struct RaftNodeConfig {
 
     // Heartbeat interval (leader → followers)
     std::chrono::milliseconds heartbeatInterval{50};
+
+    // Pluggable log store (nullptr → uses default InMemoryLogStore)
+    std::shared_ptr<RaftLogStore> logStore;
 };
 
 // =========================================================================
@@ -228,7 +234,7 @@ private:
     mutable std::mutex _mu;
     uint64_t           _currentTerm  = 0;
     std::string        _votedFor;       // empty = none
-    std::vector<LogEntry> _log;         // index 0 = sentinel (term=0, index=0)
+    std::shared_ptr<RaftLogStore> _logStore;  // pluggable log storage
 
     // ---- Volatile state ----
     RaftRole    _role     = RaftRole::FOLLOWER;

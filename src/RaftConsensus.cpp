@@ -8,6 +8,7 @@
  */
 
 #include "cog0/RaftConsensus.h"
+#include "cog0/RaftLogStore.h"
 #include "cog0/Logger.h"
 
 #include <algorithm>
@@ -110,8 +111,16 @@ RaftNode::RaftNode(RaftNodeConfig cfg, std::shared_ptr<RaftCluster> cluster)
     , _cluster(std::move(cluster))
     , _rng(std::random_device{}())
 {
-    // Sentinel entry at index 0 (Raft log is 1-indexed conceptually)
-    _log.push_back(LogEntry{0, 0, ""});
+    // Use provided log store or create default InMemoryLogStore
+    if (_cfg.logStore) {
+        _logStore = _cfg.logStore;
+        // Load persisted state if available
+        auto [term, votedFor] = _logStore->loadState();
+        _currentTerm = term;
+        _votedFor = votedFor;
+    } else {
+        _logStore = std::make_shared<InMemoryLogStore>();
+    }
 }
 
 RaftNode::~RaftNode()
@@ -190,7 +199,7 @@ uint64_t RaftNode::commitIndex() const
 size_t RaftNode::logSize() const
 {
     std::lock_guard<std::mutex> lk(_mu);
-    return _log.size();
+    return _logStore->size();
 }
 
 bool RaftNode::submitCommand(const std::string& command)
@@ -200,9 +209,10 @@ bool RaftNode::submitCommand(const std::string& command)
 
     LogEntry e;
     e.term    = _currentTerm;
-    e.index   = static_cast<uint64_t>(_log.size());
+    e.index   = _logStore->size();  // Next available index
     e.command = command;
-    _log.push_back(e);
+    _logStore->append(e);
+    _logStore->sync();  // Ensure durability
 
     // Immediately send AppendEntries to replicate
     // (The heartbeat loop will also pick this up)
@@ -212,10 +222,10 @@ bool RaftNode::submitCommand(const std::string& command)
 std::vector<LogEntry> RaftNode::committedLog() const
 {
     std::lock_guard<std::mutex> lk(_mu);
-    std::vector<LogEntry> result;
-    for (size_t i = 1; i <= _commitIndex && i < _log.size(); ++i)
-        result.push_back(_log[i]);
-    return result;
+    if (_commitIndex == 0) {
+        return {};
+    }
+    return _logStore->getRange(1, _commitIndex);
 }
 
 // -------------------------------------------------------------------------
@@ -237,6 +247,7 @@ RequestVoteReply RaftNode::handleRequestVote(const RequestVoteRPC& rpc)
         _role        = RaftRole::FOLLOWER;
         _votedFor.clear();
         _leaderId.clear();
+        _logStore->persistState(_currentTerm, _votedFor);
     }
 
     if (rpc.term < _currentTerm) {
@@ -253,6 +264,7 @@ RequestVoteReply RaftNode::handleRequestVote(const RequestVoteRPC& rpc)
         _votedFor    = rpc.candidateId;
         reply.voteGranted = true;
         _resetElectionTimer();
+        _logStore->persistState(_currentTerm, _votedFor);
     }
 
     reply.term = _currentTerm;
@@ -273,6 +285,7 @@ AppendEntriesReply RaftNode::handleAppendEntries(const AppendEntriesRPC& rpc)
         _currentTerm = rpc.term;
         _role        = RaftRole::FOLLOWER;
         _votedFor.clear();
+        _logStore->persistState(_currentTerm, _votedFor);
     }
 
     if (rpc.term < _currentTerm) {
@@ -288,8 +301,14 @@ AppendEntriesReply RaftNode::handleAppendEntries(const AppendEntriesRPC& rpc)
     }
 
     // Check prevLog consistency
-    if (rpc.prevLogIndex >= _log.size() ||
-        _log[rpc.prevLogIndex].term != rpc.prevLogTerm) {
+    size_t logSize = _logStore->size();
+    if (rpc.prevLogIndex >= logSize) {
+        reply.term = _currentTerm;
+        return reply;
+    }
+
+    LogEntry prevEntry = _logStore->get(rpc.prevLogIndex);
+    if (prevEntry.term != rpc.prevLogTerm) {
         reply.term = _currentTerm;
         return reply;
     }
@@ -298,21 +317,34 @@ AppendEntriesReply RaftNode::handleAppendEntries(const AppendEntriesRPC& rpc)
     size_t insertPos = rpc.prevLogIndex + 1;
     for (size_t i = 0; i < rpc.entries.size(); ++i) {
         size_t pos = insertPos + i;
-        if (pos < _log.size()) {
-            if (_log[pos].term != rpc.entries[i].term) {
-                _log.erase(_log.begin() + static_cast<long>(pos), _log.end());
-                _log.push_back(rpc.entries[i]);
+        if (pos < _logStore->size()) {
+            LogEntry existing = _logStore->get(pos);
+            if (existing.term != rpc.entries[i].term) {
+                // Truncate conflicting entries
+                _logStore->truncateAfter(pos - 1);
+                // Append new entry
+                LogEntry e = rpc.entries[i];
+                e.index = pos;
+                _logStore->append(e);
             }
             // else already present — no-op
         } else {
-            _log.push_back(rpc.entries[i]);
+            // Append new entry
+            LogEntry e = rpc.entries[i];
+            e.index = pos;
+            _logStore->append(e);
         }
+    }
+
+    // Sync after appending entries
+    if (!rpc.entries.empty()) {
+        _logStore->sync();
     }
 
     // Advance commit index
     if (rpc.leaderCommit > _commitIndex) {
         _commitIndex = std::min(rpc.leaderCommit,
-                                static_cast<uint64_t>(_log.size() - 1));
+                                static_cast<uint64_t>(_logStore->size() - 1));
     }
 
     reply.success    = true;
@@ -425,12 +457,15 @@ void RaftNode::_sendHeartbeats()
             if (_role != RaftRole::LEADER) return;
             nextIdx      = _nextIndex.count(peer) ? _nextIndex[peer] : 1;
             prevLogIndex = nextIdx > 0 ? nextIdx - 1 : 0;
-            prevLogTerm  = prevLogIndex < _log.size()
-                               ? _log[prevLogIndex].term : 0;
+            
+            LogEntry prevEntry = _logStore->get(prevLogIndex);
+            prevLogTerm = prevEntry.term;
 
             // Send any un-replicated entries
-            for (size_t i = nextIdx; i < _log.size(); ++i)
-                entries.push_back(_log[i]);
+            size_t logSize = _logStore->size();
+            for (size_t i = nextIdx; i < logSize; ++i) {
+                entries.push_back(_logStore->get(i));
+            }
         }
 
         AppendEntriesRPC rpc;
@@ -479,6 +514,7 @@ void RaftNode::_becomeFollower(uint64_t term, const std::string& leaderId)
     _votedFor.clear();
     _leaderId    = leaderId;
     _resetElectionTimer();
+    _logStore->persistState(_currentTerm, _votedFor);
     logger().debug("RaftNode " + _cfg.nodeId + " → FOLLOWER term=" +
                    std::to_string(term));
 }
@@ -491,6 +527,7 @@ void RaftNode::_becomeCandidate()
     _votedFor = _cfg.nodeId;
     _leaderId.clear();
     _resetElectionTimer();
+    _logStore->persistState(_currentTerm, _votedFor);
     logger().debug("RaftNode " + _cfg.nodeId + " → CANDIDATE term=" +
                    std::to_string(_currentTerm));
 }
@@ -535,22 +572,23 @@ bool RaftNode::_electionTimeoutExpired() const
 uint64_t RaftNode::_lastLogIndex() const
 {
     // Must hold _mu
-    return _log.empty() ? 0 : static_cast<uint64_t>(_log.size() - 1);
+    return _logStore->lastIndex();
 }
 
 uint64_t RaftNode::_lastLogTerm() const
 {
     // Must hold _mu
-    return _log.empty() ? 0 : _log.back().term;
+    return _logStore->lastTerm();
 }
 
 void RaftNode::_advanceCommitIndex()
 {
     // Must hold _mu
     // A log entry at index N is committed when a majority of matchIndex[i] >= N
-    size_t logLen = _log.size();
+    size_t logLen = _logStore->size();
     for (uint64_t n = logLen - 1; n > _commitIndex; --n) {
-        if (_log[n].term != _currentTerm) continue;
+        LogEntry entry = _logStore->get(n);
+        if (entry.term != _currentTerm) continue;
         int count = 1;  // count self
         for (const auto& peer : _cfg.peers) {
             auto it = _matchIndex.find(peer);
@@ -559,6 +597,7 @@ void RaftNode::_advanceCommitIndex()
         int majority = static_cast<int>((_cfg.peers.size() + 1) / 2) + 1;
         if (count >= majority) {
             _commitIndex = n;
+            _logStore->sync();  // Ensure committed entries are durable
             break;
         }
     }
