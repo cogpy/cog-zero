@@ -1,0 +1,40 @@
+name: "Copilot Setup Steps"
+
+# Run automatically when this file changes, and allow manual triggers.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+
+    # Minimal permissions needed for the setup steps only.
+    # Copilot is given its own token for push/PR operations.
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install C++ build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            g++ \
+            libreadline-dev
+
+      - name: Verify build toolchain
+        run: |
+          cmake --version
+          ninja --version
+          g++ --version
