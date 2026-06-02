@@ -25,6 +25,7 @@
 #  pragma comment(lib, "Ws2_32.lib")
 #  define CLOSE_SOCKET closesocket
 #  define SOCK_NONBLOCK 0
+using SocketIoResult = int;
 #else
 #  include <arpa/inet.h>
 #  include <fcntl.h>
@@ -36,6 +37,7 @@
 #  define INVALID_SOCKET (-1)
 #  define SOCKET_ERROR   (-1)
 using SOCKET = int;
+using SocketIoResult = ssize_t;
 #endif
 
 namespace cog0 {
@@ -235,7 +237,7 @@ void MonitoringServer::_handleClient(int fd)
 {
     // Read request (simplified: read up to 4KB for headers)
     char buf[4096] = {};
-    ssize_t bytesRead = ::recv(fd, buf, sizeof(buf) - 1, 0);
+    SocketIoResult bytesRead = ::recv(fd, buf, sizeof(buf) - 1, 0);
     if (bytesRead <= 0) return;
 
     std::string req(buf, static_cast<size_t>(bytesRead));
@@ -429,10 +431,11 @@ void MonitoringServer::_handleWebSocketClient(int fd)
         if (ready < 0) break;  // Error
 
         if (ready > 0) {
-            ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
+            SocketIoResult n = ::recv(fd, buf, sizeof(buf), 0);
             if (n <= 0) break;  // Connection closed
 
-            buffer.insert(buffer.end(), buf, buf + n);
+            const auto* bytes = reinterpret_cast<const uint8_t*>(buf);
+            buffer.insert(buffer.end(), bytes, bytes + static_cast<size_t>(n));
 
             // Try to decode frames
             while (!buffer.empty()) {
@@ -490,8 +493,8 @@ void MonitoringServer::_broadcastMetrics()
     std::vector<int> deadClients;
 
     for (int fd : _wsClients) {
-        ssize_t sent = ::send(fd, reinterpret_cast<const char*>(frame.data()),
-                              static_cast<int>(frame.size()), 0);
+        SocketIoResult sent = ::send(fd, reinterpret_cast<const char*>(frame.data()),
+                                     static_cast<int>(frame.size()), 0);
         if (sent <= 0) {
             deadClients.push_back(fd);
         }

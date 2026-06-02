@@ -10,13 +10,16 @@
 
 #include "cog0/DashboardAssets.h"
 
+#include <cstring>
+
 namespace cog0 {
 
 // ==========================================================================
 // Dashboard HTML
 // ==========================================================================
 
-const char* DASHBOARD_HTML = R"HTML(<!DOCTYPE html>
+const char* DASHBOARD_HTML =
+R"HTML(<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -229,7 +232,8 @@ const char* DASHBOARD_HTML = R"HTML(<!DOCTYPE html>
         }
     </style>
 </head>
-<body>
+)HTML"
+R"HTML(<body>
     <header class="header">
         <h1>🧠 cog0 Dashboard</h1>
         <div class="status">
@@ -435,6 +439,8 @@ const char* DASHBOARD_HTML = R"HTML(<!DOCTYPE html>
                 updateGoalsList(data.goals);
             }
         }
+)HTML"
+R"HTML(
 
         function updateAtomHistory(count) {
             state.atomHistory.push(count);
@@ -558,7 +564,7 @@ const char* DASHBOARD_HTML = R"HTML(<!DOCTYPE html>
 </html>
 )HTML";
 
-const size_t DASHBOARD_HTML_LEN = 14847;
+const size_t DASHBOARD_HTML_LEN = std::strlen(DASHBOARD_HTML);
 
 // Minimal favicon (1x1 transparent PNG, base64)
 const char* DASHBOARD_FAVICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";

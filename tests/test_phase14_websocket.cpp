@@ -364,6 +364,11 @@ TEST(Dashboard_HTML_NotEmpty)
     ASSERT_GT(std::strlen(DASHBOARD_HTML), size_t(100));
 }
 
+TEST(Dashboard_HTML_LengthMatchesConstant)
+{
+    ASSERT_EQ(DASHBOARD_HTML_LEN, std::strlen(DASHBOARD_HTML));
+}
+
 TEST(Dashboard_HTML_ContainsDoctype)
 {
     std::string html(DASHBOARD_HTML);
