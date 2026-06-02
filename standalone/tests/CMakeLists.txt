@@ -122,6 +122,57 @@ if(EXISTS "${COG0_TEST_SRC}/test_phase12.cpp")
 endif()
 
 # -----------------------------------------------------------------------
+# Phase 14 persistence tests (Raft log store)
+
+if(EXISTS "${COG0_TEST_SRC}/test_phase14_raft_persistence.cpp")
+    add_executable(cog0_phase14_persistence_tests
+        ${COG0_TEST_SRC}/test_main.cpp
+        ${COG0_TEST_SRC}/test_phase14_raft_persistence.cpp
+    )
+    target_link_libraries(cog0_phase14_persistence_tests PRIVATE cog0lib)
+    target_include_directories(cog0_phase14_persistence_tests PRIVATE "${COG0_TEST_SRC}")
+    add_test(NAME cog0_phase14_persistence COMMAND cog0_phase14_persistence_tests)
+    set_tests_properties(cog0_phase14_persistence PROPERTIES
+        LABELS "integration"
+        TIMEOUT 60
+    )
+endif()
+
+# -----------------------------------------------------------------------
+# Phase 14 Feature 2.1 tests: Agent Migration — Live State Hand-off
+
+if(EXISTS "${COG0_TEST_SRC}/test_phase14_migration.cpp")
+    add_executable(cog0_phase14_migration_tests
+        ${COG0_TEST_SRC}/test_main.cpp
+        ${COG0_TEST_SRC}/test_phase14_migration.cpp
+    )
+    target_link_libraries(cog0_phase14_migration_tests PRIVATE cog0lib)
+    target_include_directories(cog0_phase14_migration_tests PRIVATE "${COG0_TEST_SRC}")
+    add_test(NAME cog0_phase14_migration COMMAND cog0_phase14_migration_tests)
+    set_tests_properties(cog0_phase14_migration PROPERTIES
+        LABELS "unit"
+        TIMEOUT 60
+    )
+endif()
+
+# -----------------------------------------------------------------------
+# Phase 14 Feature 2.3 tests: WebSocket Monitoring Dashboard
+
+if(EXISTS "${COG0_TEST_SRC}/test_phase14_websocket.cpp")
+    add_executable(cog0_phase14_websocket_tests
+        ${COG0_TEST_SRC}/test_main.cpp
+        ${COG0_TEST_SRC}/test_phase14_websocket.cpp
+    )
+    target_link_libraries(cog0_phase14_websocket_tests PRIVATE cog0lib)
+    target_include_directories(cog0_phase14_websocket_tests PRIVATE "${COG0_TEST_SRC}")
+    add_test(NAME cog0_phase14_websocket COMMAND cog0_phase14_websocket_tests)
+    set_tests_properties(cog0_phase14_websocket PROPERTIES
+        LABELS "unit"
+        TIMEOUT 60
+    )
+endif()
+
+# -----------------------------------------------------------------------
 # Property-based ("fuzz") tests
 #
 # These files use the TEST() macros from test_runner.h to drive

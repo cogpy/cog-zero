@@ -6,11 +6,15 @@
  *
  * Message Serialization Component Implementation
  * Part of the AGENT-ZERO-GENESIS project - AZ-COMM-001
+ *
+ * Phase 14 Feature 3.1: Enhanced JSON parsing and basic compression
  */
 
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <cctype>
+#include <ctime>
 
 #include <opencog/atoms/base/Node.h>
 #include <opencog/atoms/base/Link.h>
@@ -20,6 +24,256 @@
 
 using namespace opencog;
 using namespace opencog::agentzero::communication;
+
+// =============================================================================
+// JSON Parsing Utilities (zero-dependency recursive descent parser)
+// =============================================================================
+
+namespace {
+
+// Skip whitespace characters
+inline void skipWhitespace(const std::string& json, size_t& pos) {
+    while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos]))) {
+        ++pos;
+    }
+}
+
+// Parse a JSON string value (handles basic escape sequences)
+std::string parseJsonString(const std::string& json, size_t& pos) {
+    if (pos >= json.size() || json[pos] != '"') {
+        return "";
+    }
+    ++pos;  // Skip opening quote
+    
+    std::string result;
+    result.reserve(64);  // Pre-allocate for typical string sizes
+    
+    while (pos < json.size() && json[pos] != '"') {
+        if (json[pos] == '\\' && pos + 1 < json.size()) {
+            ++pos;
+            switch (json[pos]) {
+                case 'n': result += '\n'; break;
+                case 't': result += '\t'; break;
+                case 'r': result += '\r'; break;
+                case '"': result += '"'; break;
+                case '\\': result += '\\'; break;
+                case '/': result += '/'; break;
+                default: result += json[pos]; break;
+            }
+        } else {
+            result += json[pos];
+        }
+        ++pos;
+    }
+    
+    if (pos < json.size()) {
+        ++pos;  // Skip closing quote
+    }
+    
+    return result;
+}
+
+// Parse a JSON value (string, number, boolean, null) as string
+std::string parseJsonValue(const std::string& json, size_t& pos) {
+    skipWhitespace(json, pos);
+    
+    if (pos >= json.size()) {
+        return "";
+    }
+    
+    // String value
+    if (json[pos] == '"') {
+        return parseJsonString(json, pos);
+    }
+    
+    // Number, boolean, or null
+    size_t start = pos;
+    
+    // Handle negative numbers
+    if (json[pos] == '-') {
+        ++pos;
+    }
+    
+    // Consume alphanumeric characters and decimal points
+    while (pos < json.size() && 
+           (std::isalnum(static_cast<unsigned char>(json[pos])) || 
+            json[pos] == '.' || json[pos] == '+' || json[pos] == '-' || json[pos] == 'e' || json[pos] == 'E')) {
+        ++pos;
+    }
+    
+    return json.substr(start, pos - start);
+}
+
+// Parse a flat JSON object into a map (does not handle nested objects)
+std::map<std::string, std::string> parseJsonObject(const std::string& json, size_t& pos) {
+    std::map<std::string, std::string> result;
+    
+    skipWhitespace(json, pos);
+    
+    if (pos >= json.size() || json[pos] != '{') {
+        return result;
+    }
+    ++pos;  // Skip opening brace
+    
+    while (pos < json.size()) {
+        skipWhitespace(json, pos);
+        
+        // End of object
+        if (json[pos] == '}') {
+            ++pos;
+            break;
+        }
+        
+        // Skip comma between entries
+        if (json[pos] == ',') {
+            ++pos;
+            continue;
+        }
+        
+        // Parse key
+        std::string key = parseJsonString(json, pos);
+        if (key.empty()) {
+            break;  // Invalid format
+        }
+        
+        // Skip colon
+        skipWhitespace(json, pos);
+        if (pos < json.size() && json[pos] == ':') {
+            ++pos;
+        }
+        skipWhitespace(json, pos);
+        
+        // Handle nested objects/arrays by skipping them
+        if (pos < json.size() && (json[pos] == '{' || json[pos] == '[')) {
+            char openChar = json[pos];
+            char closeChar = (openChar == '{') ? '}' : ']';
+            int depth = 1;
+            size_t start = pos;
+            ++pos;
+            
+            while (pos < json.size() && depth > 0) {
+                if (json[pos] == '"') {
+                    // Skip strings to avoid counting braces inside strings
+                    ++pos;
+                    while (pos < json.size() && json[pos] != '"') {
+                        if (json[pos] == '\\' && pos + 1 < json.size()) {
+                            ++pos;
+                        }
+                        ++pos;
+                    }
+                    if (pos < json.size()) ++pos;
+                } else {
+                    if (json[pos] == openChar) ++depth;
+                    else if (json[pos] == closeChar) --depth;
+                    ++pos;
+                }
+            }
+            
+            result[key] = json.substr(start, pos - start);
+        } else {
+            // Parse primitive value
+            result[key] = parseJsonValue(json, pos);
+        }
+    }
+    
+    return result;
+}
+
+// Escape a string for JSON output
+std::string escapeJsonString(const std::string& str) {
+    std::string result;
+    result.reserve(str.size() + 16);
+    
+    for (char c : str) {
+        switch (c) {
+            case '"': result += "\\\""; break;
+            case '\\': result += "\\\\"; break;
+            case '\n': result += "\\n"; break;
+            case '\r': result += "\\r"; break;
+            case '\t': result += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    // Control character - encode as \uXXXX
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+                    result += buf;
+                } else {
+                    result += c;
+                }
+                break;
+        }
+    }
+    
+    return result;
+}
+
+// Simple Run-Length Encoding compression
+// Format: for runs of 4+ identical bytes, encode as <marker><count><byte>
+// Marker byte is 0xFF (chosen because it's rare in text/JSON)
+std::string rleCompress(const std::string& data) {
+    if (data.empty()) return data;
+    
+    const uint8_t RLE_MARKER = 0xFF;
+    const size_t MIN_RUN_LENGTH = 4;
+    const size_t MAX_RUN_LENGTH = 255;
+    
+    std::string result;
+    result.reserve(data.size());
+    
+    size_t i = 0;
+    while (i < data.size()) {
+        // Count consecutive identical bytes
+        size_t runLength = 1;
+        while (i + runLength < data.size() && 
+               runLength < MAX_RUN_LENGTH &&
+               data[i + runLength] == data[i]) {
+            ++runLength;
+        }
+        
+        if (runLength >= MIN_RUN_LENGTH || 
+            static_cast<uint8_t>(data[i]) == RLE_MARKER) {
+            // Encode as RLE
+            result += static_cast<char>(RLE_MARKER);
+            result += static_cast<char>(runLength);
+            result += data[i];
+            i += runLength;
+        } else {
+            // Copy literal bytes
+            result += data[i];
+            ++i;
+        }
+    }
+    
+    return result;
+}
+
+// RLE decompression
+std::string rleDecompress(const std::string& data) {
+    if (data.empty()) return data;
+    
+    const uint8_t RLE_MARKER = 0xFF;
+    
+    std::string result;
+    result.reserve(data.size() * 2);  // Estimate expansion
+    
+    size_t i = 0;
+    while (i < data.size()) {
+        if (static_cast<uint8_t>(data[i]) == RLE_MARKER && i + 2 < data.size()) {
+            // Decode RLE sequence
+            size_t count = static_cast<uint8_t>(data[i + 1]);
+            char byte = data[i + 2];
+            result.append(count, byte);
+            i += 3;
+        } else {
+            result += data[i];
+            ++i;
+        }
+    }
+    
+    return result;
+}
+
+}  // anonymous namespace
 
 MessageSerializer::MessageSerializer(AtomSpacePtr atomspace,
                                    bool enable_compression,
@@ -193,17 +447,72 @@ std::string MessageSerializer::serializeAtoms(const std::vector<Handle>& handles
 std::vector<Handle> MessageSerializer::deserializeAtoms(const std::string& atoms_data) {
     std::vector<Handle> handles;
     
-    // Simple parsing (placeholder implementation)
-    // In a full implementation, this would properly parse the JSON array
-    
     if (atoms_data.empty() || atoms_data == "[]") {
         return handles;
     }
     
-    // For now, just create one atom from the data
-    Handle atom = deserializeAtom(atoms_data);
-    if (atom != Handle::UNDEFINED) {
-        handles.push_back(atom);
+    // Parse JSON array of atoms
+    size_t pos = 0;
+    skipWhitespace(atoms_data, pos);
+    
+    if (pos >= atoms_data.size() || atoms_data[pos] != '[') {
+        // Not an array - try to parse as single atom
+        Handle atom = deserializeAtom(atoms_data);
+        if (atom != Handle::UNDEFINED) {
+            handles.push_back(atom);
+        }
+        return handles;
+    }
+    
+    ++pos;  // Skip opening bracket
+    
+    while (pos < atoms_data.size()) {
+        skipWhitespace(atoms_data, pos);
+        
+        // End of array
+        if (atoms_data[pos] == ']') {
+            break;
+        }
+        
+        // Skip comma
+        if (atoms_data[pos] == ',') {
+            ++pos;
+            continue;
+        }
+        
+        // Find the extent of this atom object
+        if (atoms_data[pos] == '{') {
+            size_t start = pos;
+            int depth = 1;
+            ++pos;
+            
+            while (pos < atoms_data.size() && depth > 0) {
+                if (atoms_data[pos] == '"') {
+                    // Skip strings
+                    ++pos;
+                    while (pos < atoms_data.size() && atoms_data[pos] != '"') {
+                        if (atoms_data[pos] == '\\' && pos + 1 < atoms_data.size()) {
+                            ++pos;
+                        }
+                        ++pos;
+                    }
+                    if (pos < atoms_data.size()) ++pos;
+                } else {
+                    if (atoms_data[pos] == '{') ++depth;
+                    else if (atoms_data[pos] == '}') --depth;
+                    ++pos;
+                }
+            }
+            
+            std::string atomStr = atoms_data.substr(start, pos - start);
+            Handle atom = deserializeAtom(atomStr);
+            if (atom != Handle::UNDEFINED) {
+                handles.push_back(atom);
+            }
+        } else {
+            // Skip unexpected content
+            ++pos;
+        }
     }
     
     return handles;
@@ -330,13 +639,13 @@ std::string MessageSerializer::serializeToJSON(const CommMessagePtr& message) {
     
     std::stringstream ss;
     ss << "{"
-       << "\"message_id\":\"" << message->message_id << "\","
-       << "\"sender\":\"" << message->sender.toString() << "\","
-       << "\"recipient\":\"" << message->recipient.toString() << "\","
+       << "\"message_id\":\"" << escapeJsonString(message->message_id) << "\","
+       << "\"sender\":\"" << escapeJsonString(message->sender.toString()) << "\","
+       << "\"recipient\":\"" << escapeJsonString(message->recipient.toString()) << "\","
        << "\"type\":\"" << utils::messageTypeToString(message->type) << "\","
        << "\"priority\":\"" << utils::priorityToString(message->priority) << "\","
        << "\"protocol\":\"" << utils::protocolTypeToString(message->protocol) << "\","
-       << "\"content\":\"" << message->content << "\","
+       << "\"content\":\"" << escapeJsonString(message->content) << "\","
        << "\"timestamp\":\"" << formatTimestamp(message->timestamp) << "\","
        << "\"expires\":\"" << formatTimestamp(message->expires) << "\","
        << "\"schema_version\":\"" << _schema_version << "\"";
@@ -348,7 +657,8 @@ std::string MessageSerializer::serializeToJSON(const CommMessagePtr& message) {
         for (const auto& pair : message->metadata) {
             if (!first) ss << ",";
             first = false;
-            ss << "\"" << pair.first << "\":\"" << pair.second << "\"";
+            ss << "\"" << escapeJsonString(pair.first) << "\":\"" 
+               << escapeJsonString(pair.second) << "\"";
         }
         ss << "}";
     }
@@ -370,76 +680,148 @@ CommMessagePtr MessageSerializer::deserializeFromJSON(const std::string& json_da
         return nullptr;
     }
     
-    // Simple JSON parsing (placeholder implementation)
-    // In a full implementation, this would use a proper JSON parser
+    // Use proper JSON parser
+    size_t pos = 0;
+    std::map<std::string, std::string> fields = parseJsonObject(json_data, pos);
+    
+    if (fields.empty()) {
+        logger().warn("Failed to parse JSON message data");
+        return nullptr;
+    }
     
     auto message = std::make_shared<CommMessage>();
     
-    // Extract basic fields (very basic parsing for demonstration)
-    size_t id_pos = json_data.find("\"message_id\":\"");
-    if (id_pos != std::string::npos) {
-        id_pos += 14;  // Length of "\"message_id\":\""
-        size_t end_pos = json_data.find("\"", id_pos);
-        if (end_pos != std::string::npos) {
-            message->message_id = json_data.substr(id_pos, end_pos - id_pos);
+    // Extract fields using parsed map
+    auto it = fields.find("message_id");
+    if (it != fields.end()) {
+        message->message_id = it->second;
+    }
+    
+    it = fields.find("sender");
+    if (it != fields.end()) {
+        message->sender = utils::parseAgentId(it->second);
+    }
+    
+    it = fields.find("recipient");
+    if (it != fields.end()) {
+        message->recipient = utils::parseAgentId(it->second);
+    }
+    
+    it = fields.find("content");
+    if (it != fields.end()) {
+        message->content = it->second;
+    }
+    
+    it = fields.find("type");
+    if (it != fields.end()) {
+        message->type = utils::stringToMessageType(it->second);
+    } else {
+        message->type = MessageType::INFO;
+    }
+    
+    it = fields.find("priority");
+    if (it != fields.end()) {
+        message->priority = utils::stringToPriority(it->second);
+    } else {
+        message->priority = MessagePriority::NORMAL;
+    }
+    
+    it = fields.find("protocol");
+    if (it != fields.end()) {
+        message->protocol = utils::stringToProtocolType(it->second);
+    } else {
+        message->protocol = ProtocolType::LOCAL;
+    }
+    
+    // Parse timestamp if present
+    it = fields.find("timestamp");
+    if (it != fields.end() && !it->second.empty()) {
+        message->timestamp = parseTimestamp(it->second);
+    } else {
+        message->timestamp = std::chrono::system_clock::now();
+    }
+    
+    // Parse expiry
+    it = fields.find("expires");
+    if (it != fields.end() && !it->second.empty()) {
+        message->expires = parseTimestamp(it->second);
+    } else {
+        message->expires = message->timestamp + std::chrono::minutes(30);
+    }
+    
+    // Parse nested metadata object
+    it = fields.find("metadata");
+    if (it != fields.end() && !it->second.empty()) {
+        size_t metaPos = 0;
+        std::map<std::string, std::string> metadata = parseJsonObject(it->second, metaPos);
+        for (const auto& kv : metadata) {
+            message->metadata[kv.first] = kv.second;
         }
     }
     
-    size_t sender_pos = json_data.find("\"sender\":\"");
-    if (sender_pos != std::string::npos) {
-        sender_pos += 10;  // Length of "\"sender\":\""
-        size_t end_pos = json_data.find("\"", sender_pos);
-        if (end_pos != std::string::npos) {
-            message->sender = utils::parseAgentId(json_data.substr(sender_pos, end_pos - sender_pos));
-        }
+    // Parse atom_content if present
+    it = fields.find("atom_content");
+    if (it != fields.end() && _atomspace) {
+        message->atom_content = deserializeAtom(it->second);
     }
-    
-    size_t recipient_pos = json_data.find("\"recipient\":\"");
-    if (recipient_pos != std::string::npos) {
-        recipient_pos += 13;  // Length of "\"recipient\":\""
-        size_t end_pos = json_data.find("\"", recipient_pos);
-        if (end_pos != std::string::npos) {
-            message->recipient = utils::parseAgentId(json_data.substr(recipient_pos, end_pos - recipient_pos));
-        }
-    }
-    
-    size_t content_pos = json_data.find("\"content\":\"");
-    if (content_pos != std::string::npos) {
-        content_pos += 11;  // Length of "\"content\":\""
-        size_t end_pos = json_data.find("\"", content_pos);
-        if (end_pos != std::string::npos) {
-            message->content = json_data.substr(content_pos, end_pos - content_pos);
-        }
-    }
-    
-    // Set default values for fields not parsed
-    message->type = MessageType::INFO;
-    message->priority = MessagePriority::NORMAL;
-    message->protocol = ProtocolType::LOCAL;
-    message->timestamp = std::chrono::system_clock::now();
-    message->expires = message->timestamp + std::chrono::minutes(30);
     
     return message;
 }
 
 std::string MessageSerializer::compressData(const std::string& data) {
-    // Placeholder for compression implementation
-    // In a full implementation, this would use a compression library like zlib
+    // Use simple Run-Length Encoding for basic compression
+    // In production, this would use zlib or similar for better ratios
+    
+    if (data.size() < 64) {
+        // Don't compress very small data - overhead not worth it
+        return data;
+    }
     
     logger().debug("Compressing data of size: %zu", data.size());
     
-    // Simple "compression" - just return original data for now
-    return data;
+    std::string compressed = rleCompress(data);
+    
+    // Only use compressed version if it's actually smaller
+    if (compressed.size() < data.size()) {
+        // Prepend a marker to indicate compression
+        logger().debug("Compression ratio: %.2f%%", 
+                      100.0 * static_cast<double>(compressed.size()) / static_cast<double>(data.size()));
+        return "\x01" + compressed;  // 0x01 marker for RLE compression
+    }
+    
+    // Return original data with no-compression marker
+    return "\x00" + data;
 }
 
 std::string MessageSerializer::decompressData(const std::string& compressed_data) {
-    // Placeholder for decompression implementation
-    // In a full implementation, this would decompress the data
+    if (compressed_data.empty()) {
+        return compressed_data;
+    }
     
     logger().debug("Decompressing data of size: %zu", compressed_data.size());
     
-    // Simple "decompression" - just return original data for now
-    return compressed_data;
+    // Check compression marker
+    uint8_t marker = static_cast<uint8_t>(compressed_data[0]);
+    std::string payload = compressed_data.substr(1);
+    
+    switch (marker) {
+        case 0x00:
+            // No compression - return as-is
+            return payload;
+            
+        case 0x01:
+            // RLE compression
+            return rleDecompress(payload);
+            
+        default:
+            // Unknown format or legacy uncompressed data
+            // Assume it's raw JSON if it starts with '{'
+            if (compressed_data[0] == '{') {
+                return compressed_data;
+            }
+            logger().warn("Unknown compression marker: 0x%02x", marker);
+            return compressed_data;
+    }
 }
 
 bool MessageSerializer::validateMessageStructure(const CommMessagePtr& message) {
@@ -474,9 +856,62 @@ std::string MessageSerializer::formatTimestamp(const std::chrono::system_clock::
 }
 
 std::chrono::system_clock::time_point MessageSerializer::parseTimestamp(const std::string& timestamp) {
-    // Placeholder for timestamp parsing
-    // In a full implementation, this would properly parse ISO 8601 timestamps
+    if (timestamp.empty()) {
+        return std::chrono::system_clock::now();
+    }
     
+    // Parse ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ
+    struct tm tm = {};
+    int year, month, day, hour, min, sec;
+    
+    // Try to parse ISO 8601 format
+    if (sscanf(timestamp.c_str(), "%d-%d-%dT%d:%d:%dZ", 
+               &year, &month, &day, &hour, &min, &sec) == 6) {
+        tm.tm_year = year - 1900;
+        tm.tm_mon = month - 1;
+        tm.tm_mday = day;
+        tm.tm_hour = hour;
+        tm.tm_min = min;
+        tm.tm_sec = sec;
+        tm.tm_isdst = 0;
+        
+        // Convert to time_t (UTC)
+        time_t time_val;
+#ifdef _WIN32
+        time_val = _mkgmtime(&tm);
+#else
+        time_val = timegm(&tm);
+#endif
+        
+        if (time_val != static_cast<time_t>(-1)) {
+            return std::chrono::system_clock::from_time_t(time_val);
+        }
+    }
+    
+    // Fallback: try simpler date format YYYY-MM-DD
+    if (sscanf(timestamp.c_str(), "%d-%d-%d", &year, &month, &day) == 3) {
+        tm.tm_year = year - 1900;
+        tm.tm_mon = month - 1;
+        tm.tm_mday = day;
+        tm.tm_hour = 0;
+        tm.tm_min = 0;
+        tm.tm_sec = 0;
+        tm.tm_isdst = 0;
+        
+        time_t time_val;
+#ifdef _WIN32
+        time_val = _mkgmtime(&tm);
+#else
+        time_val = timegm(&tm);
+#endif
+        
+        if (time_val != static_cast<time_t>(-1)) {
+            return std::chrono::system_clock::from_time_t(time_val);
+        }
+    }
+    
+    // Failed to parse - return current time
+    logger().debug("Failed to parse timestamp: %s", timestamp.c_str());
     return std::chrono::system_clock::now();
 }
 

@@ -5,10 +5,13 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Lightweight HTTP/1.1 monitoring server — POSIX sockets, zero external deps.
+ * Phase 14: Added WebSocket support and embedded dashboard.
  */
 
 #include "cog0/MonitoringServer.h"
 #include "cog0/Logger.h"
+#include "cog0/WebSocketHandler.h"
+#include "cog0/DashboardAssets.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -80,6 +83,16 @@ void MonitoringServer::stop()
         _serverFd = INVALID_SOCKET;
     }
 
+    // Close all WebSocket clients
+    {
+        std::lock_guard<std::mutex> lock(_wsClientsMutex);
+        for (int fd : _wsClients) {
+            CLOSE_SOCKET(fd);
+        }
+        _wsClients.clear();
+    }
+
+    if (_wsBroadcastThread.joinable()) _wsBroadcastThread.join();
     if (_thread.joinable()) _thread.join();
 
     logger().info("MonitoringServer stopped");
@@ -106,6 +119,12 @@ AgentMetrics MonitoringServer::snapshot() const
     }
 
     return m;
+}
+
+size_t MonitoringServer::webSocketClientCount() const
+{
+    std::lock_guard<std::mutex> lock(_wsClientsMutex);
+    return _wsClients.size();
 }
 
 // =========================================================================
@@ -166,6 +185,11 @@ void MonitoringServer::_listenLoop()
     logger().debug("MonitoringServer: listening on port " +
                    std::to_string(_port));
 
+    // Start WebSocket broadcast thread if enabled
+    if (_wsEnabled) {
+        _wsBroadcastThread = std::thread([this] { _webSocketBroadcastLoop(); });
+    }
+
     // Accept loop with select() for graceful shutdown
     while (_running.load()) {
         fd_set readSet;
@@ -209,24 +233,33 @@ void MonitoringServer::_listenLoop()
 
 void MonitoringServer::_handleClient(int fd)
 {
-    // Read request (simplified: only care about first line)
-    char buf[1024] = {};
-    ::recv(fd, buf, sizeof(buf) - 1, 0);
+    // Read request (simplified: read up to 4KB for headers)
+    char buf[4096] = {};
+    ssize_t bytesRead = ::recv(fd, buf, sizeof(buf) - 1, 0);
+    if (bytesRead <= 0) return;
 
-    std::string req(buf);
+    std::string req(buf, static_cast<size_t>(bytesRead));
     std::string method, path;
 
     // Parse "METHOD /path HTTP/1.x\r\n…"
     std::istringstream iss(req);
     iss >> method >> path;
 
-    std::string response = _handleRequest(method, path);
+    // Check for WebSocket upgrade
+    if (_wsEnabled && WebSocketHandler::isUpgradeRequest(req)) {
+        _handleWebSocketUpgrade(fd, req);
+        return;  // Don't close fd — it's now a WebSocket connection
+    }
+
+    std::string response = _handleRequest(method, path, req, fd);
 
     ::send(fd, response.c_str(), static_cast<int>(response.size()), 0);
 }
 
 std::string MonitoringServer::_handleRequest(const std::string& method,
-                                              const std::string& path)
+                                              const std::string& path,
+                                              const std::string& /* headers */,
+                                              int /* clientFd */)
 {
     if (method != "GET")
         return _httpMethodNotAllowed();
@@ -239,6 +272,8 @@ std::string MonitoringServer::_handleRequest(const std::string& method,
         return _httpOk(_routeAtoms());
     if (path == "/attention")
         return _httpOk(_routeAttention());
+    if (path == "/dashboard" || path == "/")
+        return _httpOkHtml(_routeDashboard());
 
     return _httpNotFound();
 }
@@ -338,6 +373,147 @@ std::string MonitoringServer::_routeAttention() const
     return out.str();
 }
 
+std::string MonitoringServer::_routeDashboard() const
+{
+    return std::string(DASHBOARD_HTML);
+}
+
+// =========================================================================
+// WebSocket handling
+// =========================================================================
+
+void MonitoringServer::_handleWebSocketUpgrade(int fd, const std::string& headers)
+{
+    std::string secKey = WebSocketHandler::extractSecKey(headers);
+    if (secKey.empty()) {
+        // Invalid upgrade request
+        std::string response = _httpNotFound();
+        ::send(fd, response.c_str(), static_cast<int>(response.size()), 0);
+        return;
+    }
+
+    // Send upgrade response
+    std::string response = WebSocketHandler::upgradeResponse(secKey);
+    ::send(fd, response.c_str(), static_cast<int>(response.size()), 0);
+
+    // Add to WebSocket clients list
+    {
+        std::lock_guard<std::mutex> lock(_wsClientsMutex);
+        _wsClients.push_back(fd);
+    }
+
+    logger().debug("WebSocket client connected, fd=" + std::to_string(fd));
+
+    // Handle WebSocket client in a separate thread
+    std::thread([this, fd] { _handleWebSocketClient(fd); }).detach();
+}
+
+void MonitoringServer::_handleWebSocketClient(int fd)
+{
+    // Set socket to non-blocking for polling
+    std::vector<uint8_t> buffer;
+    buffer.reserve(1024);
+
+    while (_running.load()) {
+        // Read available data
+        char buf[1024];
+        fd_set readSet;
+        FD_ZERO(&readSet);
+        FD_SET(fd, &readSet);
+
+        timeval tv{};
+        tv.tv_sec = 0;
+        tv.tv_usec = 100'000;  // 100ms timeout
+
+        int ready = ::select(fd + 1, &readSet, nullptr, nullptr, &tv);
+        if (ready < 0) break;  // Error
+
+        if (ready > 0) {
+            ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
+            if (n <= 0) break;  // Connection closed
+
+            buffer.insert(buffer.end(), buf, buf + n);
+
+            // Try to decode frames
+            while (!buffer.empty()) {
+                std::string payload;
+                WebSocketHandler::Opcode op;
+                size_t consumed = WebSocketHandler::decodeFrameFromBuffer(
+                    buffer.data(), buffer.size(), payload, op);
+
+                if (consumed == 0) break;  // Incomplete frame
+
+                buffer.erase(buffer.begin(),
+                             buffer.begin() + static_cast<std::ptrdiff_t>(consumed));
+
+                // Handle control frames
+                if (op == WebSocketHandler::CLOSE) {
+                    // Send close frame back
+                    auto closeFrame = WebSocketHandler::closeFrame(1000, "");
+                    ::send(fd, reinterpret_cast<const char*>(closeFrame.data()),
+                           static_cast<int>(closeFrame.size()), 0);
+                    _removeWebSocketClient(fd);
+                    CLOSE_SOCKET(fd);
+                    return;
+                } else if (op == WebSocketHandler::PING) {
+                    auto pongFrame = WebSocketHandler::pongFrame(payload);
+                    ::send(fd, reinterpret_cast<const char*>(pongFrame.data()),
+                           static_cast<int>(pongFrame.size()), 0);
+                }
+                // TEXT frames from client could be commands — ignore for now
+            }
+        }
+    }
+
+    _removeWebSocketClient(fd);
+    CLOSE_SOCKET(fd);
+}
+
+void MonitoringServer::_webSocketBroadcastLoop()
+{
+    while (_running.load()) {
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(_wsBroadcastIntervalMs));
+
+        if (!_running.load()) break;
+
+        _broadcastMetrics();
+    }
+}
+
+void MonitoringServer::_broadcastMetrics()
+{
+    std::string metricsJson = _routeMetrics();
+    auto frame = WebSocketHandler::encodeFrame(metricsJson, WebSocketHandler::TEXT);
+
+    std::lock_guard<std::mutex> lock(_wsClientsMutex);
+    std::vector<int> deadClients;
+
+    for (int fd : _wsClients) {
+        ssize_t sent = ::send(fd, reinterpret_cast<const char*>(frame.data()),
+                              static_cast<int>(frame.size()), 0);
+        if (sent <= 0) {
+            deadClients.push_back(fd);
+        }
+    }
+
+    // Remove dead clients
+    for (int fd : deadClients) {
+        _wsClients.erase(
+            std::remove(_wsClients.begin(), _wsClients.end(), fd),
+            _wsClients.end());
+        CLOSE_SOCKET(fd);
+    }
+}
+
+void MonitoringServer::_removeWebSocketClient(int fd)
+{
+    std::lock_guard<std::mutex> lock(_wsClientsMutex);
+    _wsClients.erase(
+        std::remove(_wsClients.begin(), _wsClients.end(), fd),
+        _wsClients.end());
+}
+
 // =========================================================================
 // HTTP helpers
 // =========================================================================
@@ -347,6 +523,18 @@ std::string MonitoringServer::_routeAttention() const
     std::ostringstream h;
     h << "HTTP/1.1 200 OK\r\n"
       << "Content-Type: application/json\r\n"
+      << "Content-Length: " << body.size() << "\r\n"
+      << "Connection: close\r\n"
+      << "\r\n"
+      << body;
+    return h.str();
+}
+
+/*static*/ std::string MonitoringServer::_httpOkHtml(const std::string& body)
+{
+    std::ostringstream h;
+    h << "HTTP/1.1 200 OK\r\n"
+      << "Content-Type: text/html; charset=utf-8\r\n"
       << "Content-Length: " << body.size() << "\r\n"
       << "Connection: close\r\n"
       << "\r\n"

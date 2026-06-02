@@ -175,6 +175,37 @@ public:
      */
     void shutdown();
 
+    // -----------------------------------------------------------------------
+    // Migration API (Phase 14 Feature 2.1)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Initiate agent migration between nodes
+     * @param sourceNode Node currently hosting the agent
+     * @param targetNode Node to migrate the agent to
+     * @param agentId Unique identifier for the agent being migrated
+     * @return true if migration initiated successfully
+     */
+    bool initiateMigration(const std::string& sourceNode,
+                          const std::string& targetNode,
+                          const std::string& agentId);
+
+    /**
+     * Receive a migrated agent state
+     * @param serializedState JSON-serialized agent state
+     * @param sourceNode Node the agent is migrating from
+     * @return true if agent state received and restored successfully
+     */
+    bool receiveMigration(const std::string& serializedState,
+                         const std::string& sourceNode);
+
+    /**
+     * Get current migration status for an agent
+     * @param agentId Agent identifier
+     * @return Status string: "none", "pending", "in_progress", "completed", "failed"
+     */
+    std::string getMigrationStatus(const std::string& agentId) const;
+
 private:
     AtomSpacePtr atomspace_;
     std::string cluster_id_;
@@ -190,11 +221,34 @@ private:
     
     std::map<std::string, NodeInfo> nodes_;
     mutable std::mutex nodes_mutex_;
+
+    // Migration tracking
+    enum class MigrationStatus {
+        NONE,
+        PENDING,
+        IN_PROGRESS,
+        COMPLETED,
+        FAILED
+    };
+
+    struct MigrationRecord {
+        std::string agentId;
+        std::string sourceNode;
+        std::string targetNode;
+        MigrationStatus status;
+        std::string serializedState;
+        std::chrono::system_clock::time_point startTime;
+    };
+
+    std::map<std::string, MigrationRecord> migrations_;
+    mutable std::mutex migrations_mutex_;
     
     // Helper methods
     void storeNodeInAtomSpace(const NodeInfo& node);
     void removeNodeFromAtomSpace(const std::string& node_id);
     bool pingNode(const std::string& node_id);
+
+    static std::string migrationStatusToString(MigrationStatus status);
     
     // Logging
     Logger logger_;

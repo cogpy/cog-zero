@@ -17,10 +17,13 @@
  *   GET /metrics    — JSON object with AtomStore size, cycle count, timing
  *   GET /atoms      — JSON array of all atoms in the AtomStore
  *   GET /attention  — JSON array of (atom, STI, LTI) sorted by STI
+ *   GET /dashboard  — Interactive HTML/JS dashboard (Phase 14)
+ *   WS  /ws/metrics — WebSocket endpoint for real-time metrics push
  *
  * Usage
  * ─────
  *   MonitoringServer srv(store, loop, 8080);
+ *   srv.enableWebSocket(true);  // enable real-time dashboard
  *   srv.start();          // starts background listener thread
  *   // … agent runs …
  *   srv.stop();           // graceful shutdown
@@ -30,10 +33,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "AtomStore.h"
 #include "CognitiveLoop.h"
@@ -94,20 +100,46 @@ public:
     /// to the /metrics response (e.g. for application-specific counters).
     void setExtraMetricsHook(MetricsHook hook) { _extraHook = std::move(hook); }
 
+    // ----------------------------------------------------------------
+    // WebSocket support (Phase 14)
+
+    /// Enable or disable WebSocket support for real-time metrics push.
+    void enableWebSocket(bool enable = true) { _wsEnabled = enable; }
+
+    /// Check if WebSocket is enabled.
+    [[nodiscard]] bool webSocketEnabled() const { return _wsEnabled; }
+
+    /// Get count of connected WebSocket clients.
+    [[nodiscard]] size_t webSocketClientCount() const;
+
+    /// Set WebSocket broadcast interval in milliseconds (default: 500ms).
+    void setWebSocketBroadcastInterval(uint32_t ms) { _wsBroadcastIntervalMs = ms; }
+
 private:
     void _listenLoop();
     void _handleClient(int fd);
 
     std::string _handleRequest(const std::string& method,
-                               const std::string& path);
+                               const std::string& path,
+                               const std::string& headers,
+                               int clientFd);
 
     std::string _routeHealth()    const;
     std::string _routeMetrics()   const;
     std::string _routeAtoms()     const;
     std::string _routeAttention() const;
+    std::string _routeDashboard() const;
+
+    // ---- WebSocket handling ----
+    void _handleWebSocketUpgrade(int fd, const std::string& headers);
+    void _handleWebSocketClient(int fd);
+    void _webSocketBroadcastLoop();
+    void _broadcastMetrics();
+    void _removeWebSocketClient(int fd);
 
     // ---- HTTP helpers ----
     static std::string _httpOk(const std::string& body);
+    static std::string _httpOkHtml(const std::string& body);
     static std::string _httpNotFound();
     static std::string _httpMethodNotAllowed();
 
@@ -128,6 +160,13 @@ private:
     // Accumulated stats
     mutable std::atomic<uint64_t>  _rulesFiredTotal{0};
     mutable std::atomic<uint64_t>  _cycleTimeAccumMs{0};
+
+    // ---- WebSocket state ----
+    bool                           _wsEnabled = false;
+    uint32_t                       _wsBroadcastIntervalMs = 500;
+    std::vector<int>               _wsClients;
+    mutable std::mutex             _wsClientsMutex;
+    std::thread                    _wsBroadcastThread;
 };
 
 } // namespace cog0

@@ -84,6 +84,7 @@ foreach(_h
     Agent
     cog0_capi
     RaftConsensus
+    RaftLogStore
     ConflictResolver
     MonitoringServer
     TaskManager
@@ -97,6 +98,9 @@ foreach(_h
     MultiModalSensor
     TextualSensor
     AttentionManager
+    # Phase 14: WebSocket dashboard
+    WebSocketHandler
+    DashboardAssets
 )
     file(CREATE_LINK
         "${COG0_ROOT_INCLUDE_DIR}/${_h}.h"
@@ -127,8 +131,12 @@ set(COG0_SOURCES
     ${COG0_SRC_DIR}/EpisodicMemory.cpp
     # Phase 12: advanced coordination & observability
     ${COG0_SRC_DIR}/RaftConsensus.cpp
+    ${COG0_SRC_DIR}/RaftLogStore.cpp
     ${COG0_SRC_DIR}/ConflictResolver.cpp
     ${COG0_SRC_DIR}/MonitoringServer.cpp
+    # Phase 14: WebSocket monitoring dashboard
+    ${COG0_SRC_DIR}/WebSocketHandler.cpp
+    ${COG0_SRC_DIR}/DashboardAssets.cpp
 )
 
 add_library(cog0lib STATIC ${COG0_SOURCES})

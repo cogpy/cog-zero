@@ -3,7 +3,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 [![C++17](https://img.shields.io/badge/C++-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
 [![OpenCog](https://img.shields.io/badge/OpenCog-Integration-green.svg)](https://opencog.org)
-[![Tests](https://img.shields.io/badge/tests-147%20passing-brightgreen.svg)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-210%2B%20passing-brightgreen.svg)](#-testing)
 
 **CogZero** is a high-performance C++ implementation of Agent-Zero, specially optimized for integration with the OpenCog cognitive architecture. It serves as an orchestration workbench system that provides a modular catalog of powerful cognitive tools, skills, abilities, and knowledge enhancements.
 
@@ -365,7 +365,9 @@ See [CODE_STANDARDS.md](docs/CODE_STANDARDS.md) for detailed guidelines.
 | **Phase 9** | Integration & Testing | ✅ Implemented |
 | **Phase 10** | Advanced Features | ✅ Implemented |
 | **Phase 11** | Performance Profiling | ✅ Implemented |
-| **Phase 12** | Advanced Coordination & Observability | 📅 Planned |
+| **Phase 12** | Advanced Coordination & Observability | ✅ Implemented |
+| **Phase 13** | CI/CD Hardening | ✅ Implemented |
+| **Phase 14** | Production Hardening | ✅ Implemented |
 
 ## 🔮 Roadmap
 
@@ -375,16 +377,18 @@ See [ROADMAP.md](ROADMAP.md) for the full development roadmap.
 - [x] Standalone CLI application (`cog0`) with interactive REPL
 - [x] rc-style script file execution (`--script`)
 - [x] Inline command evaluation (`--eval`)
-- [x] Comprehensive unit + e2e test suite (147 tests, 0 failures)
-- [x] Full cognitive architecture Phases 1–11 implemented
+- [x] Comprehensive unit + e2e test suite (210+ tests, 0 failures)
+- [x] Full cognitive architecture Phases 1–14 implemented
 - [x] `goals` and `infer` REPL commands for introspection and on-demand inference
+- [x] Raft-based distributed consensus for `MultiAgentCoordinator`
+- [x] Live agent migration across cluster nodes
+- [x] Real-time monitoring dashboard (WebSocket + HTML/JS at `/dashboard`)
+- [x] Structured JSON-lines logging for log-aggregation pipelines
 
-### Next Steps (Phase 12)
-- [ ] Raft-based distributed consensus for `MultiAgentCoordinator`
-- [ ] Live agent migration across cluster nodes
-- [ ] Real-time monitoring dashboard (WebSocket + HTML/JS)
-- [ ] Structured JSON-lines logging for log-aggregation pipelines
-- [ ] gRPC agent interface
+### Future Work
+- [ ] gRPC agent interface (requires external grpc dependency)
+- [ ] TLS for MonitoringServer (requires mbedTLS/OpenSSL)
+- [ ] RocksDB-backed persistent Raft log
 
 See [AGENT-ZERO-GENESIS.md](AGENT-ZERO-GENESIS.md) for the full architecture specification and [ROADMAP.md](ROADMAP.md) for the detailed development roadmap.
 
