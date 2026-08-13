@@ -25,7 +25,7 @@ namespace cog0 {
 
 class MultiModalSensor {
 public:
-    enum class Modality { TEXT, NUMERIC, EVENT };
+    enum class Modality { TEXT, NUMERIC, EVENT, VISUAL };
 
     using SensorCallback = std::function<void(const PerceptInput&)>;
 
@@ -44,6 +44,9 @@ public:
 
     // Ingest an event by name
     void ingestEvent(const std::string& eventName, double salience = 0.5);
+
+    // Ingest a visual sample (encoded as comma-separated channel values)
+    void ingestVisual(const std::vector<double>& channels, double salience = 0.5);
 
     // Accessors
     const std::string& name()     const { return _name; }

@@ -278,11 +278,14 @@ if(BUILD_OPENCOG_MODULES)
     )
 endif()
 
-# Phase 1 agentzero-core — builds with real OpenCog or in-tree AtomSpace shim.
-# Always available so agentzero-core/tests can run under CTest without system OpenCog.
+# Phase 1 agentzero-core and Phase 2 agentzero-perception — build with real
+# OpenCog or in-tree AtomSpace shim. Always available so module tests can run
+# under CTest without system OpenCog packages installed.
 if(NOT BUILD_OPENCOG_MODULES)
     message(STATUS "Adding agentzero-core with AtomSpace shim (OpenCog modules disabled)")
     add_subdirectory(agentzero-core)
+    message(STATUS "Adding agentzero-perception with AtomSpace shim (OpenCog modules disabled)")
+    add_subdirectory(agentzero-perception)
 endif()
 
 # Standalone cog0 application (no OpenCog dependencies required)

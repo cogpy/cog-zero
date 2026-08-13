@@ -37,6 +37,18 @@ Handle PerceptualProcessor::process(const PerceptInput& p)
         return processEvent(p.content, p.salience, p.source);
     }
 
+    if (p.modality == "visual") {
+        // Visual channel blob → single concept with STI from salience
+        std::string atomName = "visual:" + p.content;
+        if (!p.source.empty()) atomName += "@" + p.source;
+        Handle h = _store->addNode(AtomType::CONCEPT, atomName);
+        h->setSTI(p.salience);
+        h->setTV({p.salience, 1.0});
+        std::lock_guard<std::mutex> lock(_mutex);
+        _history.push_back(h);
+        return h;
+    }
+
     // Generic fallback: create a CONCEPT atom with the raw content
     Handle h = _store->addNode(AtomType::CONCEPT, p.content);
     h->setSTI(p.salience);
