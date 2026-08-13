@@ -1,0 +1,35 @@
+#include "test_runner.h"
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/agentzero/SelfModification.h>
+
+using namespace opencog;
+using namespace opencog::agentzero;
+
+TEST(SelfModification_AnalyzeProposeApplyRollback)
+{
+    auto as = createAtomSpace();
+    SelfModification sm(nullptr, as);
+
+    auto analysis = sm.analyzeComponent("TaskManager");
+    ASSERT_FALSE(analysis.component_name.empty());
+
+    auto proposals = sm.proposeModifications("TaskManager", 3);
+    ASSERT_GT(proposals.size(), 0u);
+
+    auto ranked = sm.evaluateProposals(proposals);
+    ASSERT_EQ(ranked.size(), proposals.size());
+
+    sm.setSafetyLevel(SelfModification::SafetyLevel::EXPERIMENTAL);
+    auto result = sm.applyModification(ranked[0], true);
+    // applyModification returns SUCCESS, REJECTED, or FAILED (not rollback/pending)
+    ASSERT_TRUE(result.status == SelfModification::ModificationStatus::SUCCESS ||
+                result.status == SelfModification::ModificationStatus::REJECTED ||
+                result.status == SelfModification::ModificationStatus::FAILED);
+
+    if (result.status == SelfModification::ModificationStatus::SUCCESS) {
+        // Rollback should be safe to call after a successful apply
+        auto rolled = sm.rollback(result);
+        ASSERT_TRUE(rolled);
+    }
+}
