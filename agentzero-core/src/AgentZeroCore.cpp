@@ -53,7 +53,12 @@ AgentZeroCore::AgentZeroCore(CogServer& cogserver, const std::string& agent_name
 #endif // HAVE_COGSERVER
 
 AgentZeroCore::AgentZeroCore(const std::string& agent_name, AtomSpacePtr atomspace)
+#ifdef HAVE_COGSERVER
+    : Module()
+    , _atomspace(atomspace)
+#else
     : _atomspace(atomspace)
+#endif
     , _running(false)
     , _initialized(false)
     , _agent_name(agent_name)
@@ -386,9 +391,11 @@ void AgentZeroCore::initializeAtomSpace()
 
 #ifdef HAVE_COGSERVER
     if (!_atomspace) {
-        _atomspace = _cogserver.getAtomSpace();
+        if (_cogserver_ptr) {
+            _atomspace = _cogserver_ptr->getAtomSpace();
+        }
         if (!_atomspace) {
-            throw std::runtime_error("Failed to get AtomSpace from CogServer");
+            _atomspace = std::make_shared<AtomSpace>();
         }
     }
 #else
