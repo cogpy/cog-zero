@@ -22,15 +22,14 @@ TEST(SelfModification_AnalyzeProposeApplyRollback)
 
     sm.setSafetyLevel(SelfModification::SafetyLevel::EXPERIMENTAL);
     auto result = sm.applyModification(ranked[0], true);
-    // Apply may succeed or be rejected depending on safety heuristics — both OK
+    // applyModification returns SUCCESS, REJECTED, or FAILED (not rollback/pending)
     ASSERT_TRUE(result.status == SelfModification::ModificationStatus::SUCCESS ||
                 result.status == SelfModification::ModificationStatus::REJECTED ||
-                result.status == SelfModification::ModificationStatus::FAILED ||
-                result.status == SelfModification::ModificationStatus::ROLLED_BACK ||
-                result.status == SelfModification::ModificationStatus::PENDING_VALIDATION);
+                result.status == SelfModification::ModificationStatus::FAILED);
 
     if (result.status == SelfModification::ModificationStatus::SUCCESS) {
-        // Rollback should be safe to call
-        sm.rollback(result);
+        // Rollback should be safe to call after a successful apply
+        auto rolled = sm.rollback(result);
+        ASSERT_TRUE(rolled);
     }
 }

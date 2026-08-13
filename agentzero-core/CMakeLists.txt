@@ -85,10 +85,7 @@ else()
     )
 endif()
 
-if(AGENTZERO_CORE_USE_SHIM)
-    # already configured above
-    set(_AGENTZERO_SHIM_CONFIGURED TRUE)
-else()
+if(NOT AGENTZERO_CORE_USE_SHIM)
     target_include_directories(agentzero-core
         PUBLIC
             ${COGUTIL_INCLUDE_DIRS}

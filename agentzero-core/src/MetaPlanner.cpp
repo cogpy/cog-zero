@@ -313,10 +313,12 @@ MetaPlanner::PlanningStrategy MetaPlanner::optimizePlanningStrategy(const Handle
                                << strategyToString(optimal_strategy) 
                                << " (improvement: " << improvement << ")";
                 
+                // Capture previous strategy before mutation for AtomSpace record
+                PlanningStrategy previous_strategy = _current_strategy;
                 _current_strategy = optimal_strategy;
                 
                 // Record strategy change in AtomSpace
-                Handle old_strategy_atom = createStrategyAtom(_current_strategy);
+                Handle old_strategy_atom = createStrategyAtom(previous_strategy);
                 Handle new_strategy_atom = createStrategyAtom(optimal_strategy);
                 Handle change_pred = _atomspace->add_node(PREDICATE_NODE, "strategy_optimized");
                 Handle change_link = _atomspace->add_link(ORDERED_LINK, {old_strategy_atom, new_strategy_atom});
