@@ -20,9 +20,8 @@ MultiModalSensor::MultiModalSensor(const SensorInfo& info)
 
 MultiModalSensor::~MultiModalSensor()
 {
-    if (_active.load()) {
-        stop();
-    }
+    // Non-virtual shutdown path — do not call virtual stop() from a destructor.
+    _active.store(false);
 }
 
 bool MultiModalSensor::initialize()

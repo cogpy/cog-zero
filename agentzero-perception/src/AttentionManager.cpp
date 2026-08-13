@@ -41,20 +41,34 @@ double AttentionManager::clamp01(double v)
 
 void AttentionManager::setSTIUnlocked(const Handle& atom, double sti)
 {
+    if (!std::isfinite(sti)) {
+        return; // ignore NaN/Inf — do not poison the attention map
+    }
     if (sti < _config.min_sti) sti = _config.min_sti;
     if (sti > _config.max_sti) sti = _config.max_sti;
     _sti[atom] = sti;
 
-    // Best-effort mirror onto Atom STI (shim uses short; scale 0..1 → 0..1000)
+    // Best-effort mirror onto Atom STI (shim uses short).
+    // Always project into a fixed 0..1000 display range from the normalized
+    // position within [min_sti, max_sti] so large max_sti cannot overflow short.
     if (atom) {
-        short scaled = static_cast<short>(std::lround(sti * 1000.0));
-        atom->setSTI(scaled);
+        double span = _config.max_sti - _config.min_sti;
+        double norm = (span > 1e-12) ? ((sti - _config.min_sti) / span) : 0.0;
+        if (norm < 0.0) norm = 0.0;
+        if (norm > 1.0) norm = 1.0;
+        long scaled = std::lround(norm * 1000.0);
+        if (scaled < 0) scaled = 0;
+        if (scaled > 1000) scaled = 1000;
+        atom->setSTI(static_cast<short>(scaled));
     }
 }
 
 double AttentionManager::allocateAttention(const Handle& atom, double salience)
 {
     if (!atom) {
+        return 0.0;
+    }
+    if (!std::isfinite(salience)) {
         return 0.0;
     }
 
@@ -71,6 +85,7 @@ double AttentionManager::allocateAttention(const Handle& atom, double salience)
 void AttentionManager::updateAttention(const Handle& atom, double sti)
 {
     if (!atom) return;
+    if (!std::isfinite(sti)) return;
     std::lock_guard<std::mutex> lock(_mu);
     setSTIUnlocked(atom, sti);
 }
@@ -96,8 +111,12 @@ void AttentionManager::decayAttention()
     const double keep = 1.0 - _config.decay_rate;
     std::vector<Handle> drop;
     for (auto& kv : _sti) {
+        if (!std::isfinite(kv.second)) {
+            drop.push_back(kv.first);
+            continue;
+        }
         double next = kv.second * keep;
-        if (next <= _config.min_sti + 1e-12) {
+        if (!std::isfinite(next) || next <= _config.min_sti + 1e-12) {
             drop.push_back(kv.first);
         } else {
             setSTIUnlocked(kv.first, next);

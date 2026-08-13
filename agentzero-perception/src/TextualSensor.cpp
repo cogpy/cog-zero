@@ -193,14 +193,17 @@ HandleSeq TextualSensor::processText(const std::string& text)
 
     for (const auto& u : units) {
         if (u.empty()) continue;
+        // calculateSalience updates novelty counters for the unit key;
+        // do not double-increment vocabulary here for the same tokens.
         TextSalienceScore score = calculateSalience(u);
         Handle h = encodeUnit(u, score);
         result.push_back(h);
         std::lock_guard<std::mutex> lock(_mu);
         ++_processed_units;
-        // Update vocabulary with words from unit
-        for (const auto& w : splitWords(u)) {
-            _vocabulary[w]++;
+        // Record remaining words (beyond the novelty key already counted)
+        auto words = splitWords(u);
+        for (size_t i = 1; i < words.size(); ++i) {
+            _vocabulary[words[i]]++;
         }
     }
     return result;

@@ -162,3 +162,18 @@ TEST(Perceptual_CreatesEvaluationLinks)
     ASSERT_TRUE(as->is_valid_handle(h));
     ASSERT_GT(as->get_handles_by_type(EVALUATION_LINK).size(), 0u);
 }
+
+TEST(Perceptual_DistinctVectorsGetDistinctAtoms)
+{
+    auto as = createAtomSpace();
+    Handle self = as->add_node(CONCEPT_NODE, "TestAgent");
+    PerceptualProcessor proc(as, self);
+
+    SensoryInput a("visual", "cam", {1.0, 2.0, 3.0}, 0.9);
+    SensoryInput b("visual", "cam", {1.0, 9.0, 3.0}, 0.9);
+    Handle ha = proc.processInput(a);
+    Handle hb = proc.processInput(b);
+    ASSERT_NE(ha, Handle::UNDEFINED);
+    ASSERT_NE(hb, Handle::UNDEFINED);
+    ASSERT_NE(ha, hb);
+}

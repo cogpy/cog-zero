@@ -10,6 +10,7 @@
 #include <opencog/util/Logger.h>
 
 #include <cmath>
+#include <cstdint>
 #include <sstream>
 #include <stdexcept>
 
@@ -51,15 +52,24 @@ Handle PerceptualProcessor::encodeInput(const SensoryInput& input)
     name << "percept/" << (input.sensor_type.empty() ? "generic" : input.sensor_type)
          << "/" << (input.modality.empty() ? "unknown" : input.modality);
 
-    // Disambiguate empty samples vs content-bearing ones via data fingerprint
+    // Full-content fingerprint so distinct vectors never collide.
+    // FNV-1a 64-bit over little-endian doubles + size.
     if (!input.data.empty()) {
-        name << "#";
-        // Compact fingerprint: size + first/last values
-        name << input.data.size();
-        name << ":" << input.data.front();
-        if (input.data.size() > 1) {
-            name << ":" << input.data.back();
+        uint64_t hash = 14695981039346656037ull;
+        auto mix = [&](const void* p, size_t n) {
+            const auto* bytes = static_cast<const unsigned char*>(p);
+            for (size_t i = 0; i < n; ++i) {
+                hash ^= bytes[i];
+                hash *= 1099511628211ull;
+            }
+        };
+        const uint64_t n = static_cast<uint64_t>(input.data.size());
+        mix(&n, sizeof(n));
+        for (double v : input.data) {
+            mix(&v, sizeof(v));
         }
+        name << "#h" << std::hex << hash << std::dec;
+        name << "n" << input.data.size();
     } else {
         name << "#empty";
     }
@@ -81,12 +91,14 @@ Handle PerceptualProcessor::encodeInput(const SensoryInput& input)
         _atomspace->add_link(CONTEXT_LINK, HandleSeq{_context, percept});
     }
 
-    // Encode raw numeric channels as NUMBER_NODE members when present
+    // Encode raw numeric channels: NUMBER_NODE holds the value; CONCEPT labels the index.
     for (size_t i = 0; i < input.data.size(); ++i) {
-        std::ostringstream ch;
-        ch << "channel:" << i << "=" << input.data[i];
-        Handle num = _atomspace->add_node(NUMBER_NODE, ch.str());
-        _atomspace->add_link(MEMBER_LINK, HandleSeq{num, percept});
+        std::ostringstream val;
+        val << input.data[i];
+        Handle num = _atomspace->add_node(NUMBER_NODE, val.str());
+        Handle ch_label = _atomspace->add_node(CONCEPT_NODE, "channel:" + std::to_string(i));
+        Handle pair = _atomspace->add_link(LIST_LINK, HandleSeq{ch_label, num});
+        _atomspace->add_link(MEMBER_LINK, HandleSeq{pair, percept});
     }
 
     return percept;
