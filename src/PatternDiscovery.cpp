@@ -130,12 +130,13 @@ void PatternDiscovery::collectSubHandles(const Handle& root,
 }
 
 std::map<Handle, std::set<size_t>> PatternDiscovery::buildSupportMap(
+    const std::vector<EpisodeRecord>& episodes,
     size_t max_depth) const
 {
     std::map<Handle, std::set<size_t>> support;
-    for (size_t i = 0; i < _episodes.size(); ++i) {
+    for (size_t i = 0; i < episodes.size(); ++i) {
         std::set<Handle> subs;
-        collectSubHandles(_episodes[i].root, subs, 0, max_depth);
+        collectSubHandles(episodes[i].root, subs, 0, max_depth);
         for (auto& h : subs)
             support[h].insert(i);
     }
@@ -217,16 +218,17 @@ std::string PatternDiscovery::describePattern(const DiscoveredPattern& p) const
 // Pattern Mining (public)
 // ---------------------------------------------------------------------------
 
-std::vector<DiscoveredPattern> PatternDiscovery::minePatterns(
-    const MiningConfig& config)
+std::vector<DiscoveredPattern> PatternDiscovery::minePatternsFrom(
+    const std::vector<EpisodeRecord>& episodes,
+    const MiningConfig& config,
+    bool update_cache) const
 {
-    std::lock_guard<std::mutex> lock(_mutex);
-    if (_episodes.empty()) return {};
+    if (episodes.empty()) return {};
 
-    const size_t n = _episodes.size();
+    const size_t n = episodes.size();
 
     // Step 1: Build support map (atom → set of episode indices)
-    auto support_map = buildSupportMap(config.max_pattern_size);
+    auto support_map = buildSupportMap(episodes, config.max_pattern_size);
 
     // Step 2: Compute frequency map
     std::map<Handle, double> freq_map;
@@ -264,7 +266,7 @@ std::vector<DiscoveredPattern> PatternDiscovery::minePatterns(
         // Collect concrete instances
         auto& ep_set = support_map.at(h);
         for (size_t idx : ep_set)
-            dp.instances.push_back(_episodes[idx].root);
+            dp.instances.push_back(episodes[idx].root);
 
         dp.description = describePattern(dp);
         patterns.push_back(std::move(dp));
@@ -280,37 +282,36 @@ std::vector<DiscoveredPattern> PatternDiscovery::minePatterns(
     if (patterns.size() > config.max_results)
         patterns.resize(config.max_results);
 
-    _cached_patterns = patterns;
+    if (update_cache) {
+        _cached_patterns = patterns;
+    }
+
     logger().info() << "[PatternDiscovery] Mined " << patterns.size() << " patterns";
     return patterns;
+}
+
+std::vector<DiscoveredPattern> PatternDiscovery::minePatterns(
+    const MiningConfig& config)
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    return minePatternsFrom(_episodes, config, /*update_cache=*/true);
 }
 
 std::vector<DiscoveredPattern> PatternDiscovery::mineRecentPatterns(
     std::chrono::system_clock::time_point since,
     const MiningConfig& config)
 {
-    // Build a filtered copy of the episode list while holding the lock,
-    // then release the lock before calling minePatterns (which acquires it).
-    std::vector<EpisodeRecord> saved;
+    // Snapshot + filter under the lock, then mine the copy without mutating
+    // the live episode corpus (avoids races with concurrent recordEpisode).
     std::vector<EpisodeRecord> recent;
     {
         std::lock_guard<std::mutex> lock(_mutex);
-        saved = _episodes;
-        for (auto& r : _episodes)
+        for (const auto& r : _episodes)
             if (r.timestamp >= since) recent.push_back(r);
     }
 
-    // Temporarily replace episode list, mine, then restore.
-    {
-        std::lock_guard<std::mutex> lock(_mutex);
-        _episodes = std::move(recent);
-    }
-    auto result = minePatterns(config);
-    {
-        std::lock_guard<std::mutex> lock(_mutex);
-        _episodes = std::move(saved);
-    }
-    return result;
+    std::lock_guard<std::mutex> lock(_mutex);
+    return minePatternsFrom(recent, config, /*update_cache=*/true);
 }
 
 std::vector<DiscoveredPattern> PatternDiscovery::updatePatterns(const Handle& root)

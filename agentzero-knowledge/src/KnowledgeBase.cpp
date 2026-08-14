@@ -343,12 +343,8 @@ std::vector<Handle> KnowledgeBase::queryNeighbors(const Handle& source,
     std::vector<Handle> result;
     if (!source) return result;
 
-    IncomingSet links = incoming
-        ? source->getIncomingSetByType(link_type)
-        : source->getIncomingSetByType(link_type);
-
     if (!incoming) {
-        // outgoing: find all links of this type and check if source is in outgoing
+        // Outgoing neighbours: links of this type that contain source.
         HandleSeq all_links;
         _atomspace->get_handles_by_type(all_links, link_type);
         for (auto& lnk : all_links) {
@@ -361,6 +357,8 @@ std::vector<Handle> KnowledgeBase::queryNeighbors(const Handle& source,
         return result;
     }
 
+    // Incoming neighbours: links of this type that point at source.
+    IncomingSet links = source->getIncomingSetByType(link_type);
     for (auto& lnk : links) {
         for (auto& h : lnk->getOutgoingSet())
             if (h != source) result.push_back(h);

@@ -100,9 +100,8 @@ TEST(PLN_ForwardAndBackwardChain)
     ASSERT_GE(fwd.size(), static_cast<size_t>(1));
 
     auto bwd = lib.backwardChain(C, 2);
-    // May find BC implication whose consequent is C
-    ASSERT_GE(bwd.size(), static_cast<size_t>(0));
-    // Ensure at least the implication with cons=C is discoverable
+    // Must find at least the BC implication whose consequent is C
+    ASSERT_GE(bwd.size(), static_cast<size_t>(1));
     bool found = false;
     for (const auto& r : bwd) {
         if (r.conclusion == C) found = true;

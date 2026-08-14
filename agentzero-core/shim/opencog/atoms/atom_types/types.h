@@ -11,9 +11,9 @@ namespace opencog {
 
 using Type = uint16_t;
 
-// Top-level type used for "match any atom" queries
-static constexpr Type ATOM             = 0;
+// NOTYPE: unconstrained / invalid. ATOM: distinct base used for "match any".
 static constexpr Type NOTYPE           = 0;
+static constexpr Type ATOM             = 255;
 
 // Node types
 static constexpr Type NODE             = 1;
@@ -47,10 +47,10 @@ static constexpr Type LAMBDA_LINK      = 36;
 
 inline bool nameserver_is_a(Type t, Type base) {
     if (t == base) return true;
-    // ATOM matches every concrete atom type
-    if (base == ATOM) return t != NOTYPE || t == ATOM;
+    // ATOM matches every concrete stored atom type (not NOTYPE itself)
+    if (base == ATOM) return t != NOTYPE && t != ATOM;
     if (base == NODE) return t >= NODE && t < LIST_LINK;
-    if (base == LINK) return t >= LIST_LINK;
+    if (base == LINK) return t >= LIST_LINK && t < ATOM;
     return false;
 }
 
