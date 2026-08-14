@@ -39,6 +39,20 @@ TEST(multimodal_sensor_event_modality) {
     ASSERT_EQ(sensor.modalityName(sensor.modality()), std::string("event"));
 }
 
+TEST(multimodal_sensor_visual_modality) {
+    MultiModalSensor sensor("vis-sensor", MultiModalSensor::Modality::VISUAL);
+    ASSERT_EQ(sensor.modality(), MultiModalSensor::Modality::VISUAL);
+    ASSERT_EQ(sensor.modalityName(sensor.modality()), std::string("visual"));
+
+    std::vector<PerceptInput> received;
+    sensor.registerCallback([&](const PerceptInput& p) { received.push_back(p); });
+    sensor.ingestVisual({0.1, 0.5, 0.9}, 0.75);
+    ASSERT_EQ(received.size(), 1u);
+    ASSERT_EQ(received[0].modality, std::string("visual"));
+    ASSERT_EQ(received[0].salience, 0.75);
+    ASSERT_FALSE(received[0].content.empty());
+}
+
 TEST(multimodal_sensor_ingest_fires_callback) {
     MultiModalSensor sensor("s1");
     std::vector<PerceptInput> received;

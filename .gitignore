@@ -115,3 +115,6 @@ tmp/
 temp/
 *.tmp
 cog0_build/
+
+# Local cmake build trees
+build_*/

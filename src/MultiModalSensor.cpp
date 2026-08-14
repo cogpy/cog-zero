@@ -56,6 +56,24 @@ void MultiModalSensor::ingestEvent(const std::string& eventName, double salience
     ingest(eventName, salience);
 }
 
+void MultiModalSensor::ingestVisual(const std::vector<double>& channels, double salience)
+{
+    std::ostringstream oss;
+    for (size_t i = 0; i < channels.size(); ++i) {
+        if (i) oss << ',';
+        oss << std::fixed << std::setprecision(6) << channels[i];
+    }
+    // Temporarily present as visual modality regardless of constructed default
+    if (!_active) return;
+    PerceptInput p;
+    p.source   = _name;
+    p.modality = "visual";
+    p.content  = oss.str();
+    p.salience = salience;
+    _ingestCount.fetch_add(1, std::memory_order_relaxed);
+    notify(p);
+}
+
 // static
 std::string MultiModalSensor::modalityName(Modality m)
 {
@@ -63,6 +81,7 @@ std::string MultiModalSensor::modalityName(Modality m)
         case Modality::TEXT:    return "text";
         case Modality::NUMERIC: return "numeric";
         case Modality::EVENT:   return "event";
+        case Modality::VISUAL:  return "visual";
     }
     return "unknown";
 }
