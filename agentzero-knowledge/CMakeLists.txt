@@ -1,80 +1,131 @@
 # agentzero-knowledge/CMakeLists.txt
 # Agent-Zero Knowledge Representation & Reasoning — Phase 3
 # Part of the AGENT-ZERO-GENESIS project
+#
+# Builds against real OpenCog (cogutil/atomspace) when available.
+# Otherwise uses the in-tree AtomSpace shim from agentzero-core so the
+# module and its tests can still be built and exercised under CTest.
+# Optional PLN / URE / miner packages enable HAVE_* compile definitions.
 
 cmake_minimum_required(VERSION 3.16)
 
-project(AgentZeroKnowledge
-    VERSION 0.1.0
-    DESCRIPTION "Agent-Zero Knowledge Representation & Reasoning Module"
-    LANGUAGES CXX
-)
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-find_package(PkgConfig REQUIRED)
-
-pkg_check_modules(COGUTIL cogutil)
-if(NOT COGUTIL_FOUND)
-    message(WARNING "cogutil not found — agentzero-knowledge will not be built")
-    return()
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    project(AgentZeroKnowledge
+        VERSION 0.1.0
+        DESCRIPTION "Agent-Zero Knowledge Representation & Reasoning Module"
+        LANGUAGES CXX
+    )
+    set(AGENTZERO_KNOWLEDGE_STANDALONE_BUILD TRUE)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    get_filename_component(COGZERO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+else()
+    set(AGENTZERO_KNOWLEDGE_STANDALONE_BUILD FALSE)
+    set(COGZERO_ROOT "${CMAKE_SOURCE_DIR}")
 endif()
 
-pkg_check_modules(ATOMSPACE atomspace)
-if(NOT ATOMSPACE_FOUND)
-    message(WARNING "atomspace not found — agentzero-knowledge will not be built")
-    return()
+option(AGENTZERO_KNOWLEDGE_USE_SHIM "Force use of in-tree AtomSpace shim" OFF)
+
+find_package(Threads REQUIRED)
+find_package(PkgConfig QUIET)
+
+set(AGENTZERO_KNOWLEDGE_HAVE_OPENCOG FALSE)
+
+if(NOT AGENTZERO_KNOWLEDGE_USE_SHIM AND PkgConfig_FOUND)
+    pkg_check_modules(COGUTIL cogutil)
+    pkg_check_modules(ATOMSPACE atomspace)
+    if(COGUTIL_FOUND AND ATOMSPACE_FOUND)
+        set(AGENTZERO_KNOWLEDGE_HAVE_OPENCOG TRUE)
+    endif()
 endif()
 
-pkg_check_modules(PLN pln)
-pkg_check_modules(URE ure)
-pkg_check_modules(MINER miner)
+# Optional reasoning packages (real OpenCog only)
+set(AGENTZERO_KNOWLEDGE_HAVE_PLN FALSE)
+set(AGENTZERO_KNOWLEDGE_HAVE_URE FALSE)
+set(AGENTZERO_KNOWLEDGE_HAVE_MINER FALSE)
 
-include_directories(
-    ${CMAKE_SOURCE_DIR}/include
-    ${COGUTIL_INCLUDE_DIRS}
-    ${ATOMSPACE_INCLUDE_DIRS}
-)
+if(AGENTZERO_KNOWLEDGE_HAVE_OPENCOG AND PkgConfig_FOUND)
+    pkg_check_modules(PLN pln)
+    pkg_check_modules(URE ure)
+    pkg_check_modules(MINER miner)
+    if(PLN_FOUND)
+        set(AGENTZERO_KNOWLEDGE_HAVE_PLN TRUE)
+    endif()
+    if(URE_FOUND)
+        set(AGENTZERO_KNOWLEDGE_HAVE_URE TRUE)
+    endif()
+    if(MINER_FOUND)
+        set(AGENTZERO_KNOWLEDGE_HAVE_MINER TRUE)
+    endif()
+endif()
 
-link_directories(
-    ${COGUTIL_LIBRARY_DIRS}
-    ${ATOMSPACE_LIBRARY_DIRS}
-)
+if(NOT AGENTZERO_KNOWLEDGE_HAVE_OPENCOG)
+    message(STATUS "agentzero-knowledge: OpenCog not found — building with in-tree AtomSpace shim")
+    set(AGENTZERO_KNOWLEDGE_USE_SHIM TRUE)
+endif()
 
 set(AGENTZERO_KNOWLEDGE_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/KnowledgeBase.cpp
-    ${CMAKE_SOURCE_DIR}/src/PatternDiscovery.cpp
-    ${CMAKE_SOURCE_DIR}/src/ConceptFormation.cpp
-    ${CMAKE_SOURCE_DIR}/src/PLNRuleLibrary.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/KnowledgeBase.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/PatternDiscovery.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ConceptFormation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/PLNRuleLibrary.cpp
 )
 
 add_library(agentzero-knowledge SHARED ${AGENTZERO_KNOWLEDGE_SOURCES})
 
-target_include_directories(agentzero-knowledge PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-)
-
-target_link_libraries(agentzero-knowledge
-    ${COGUTIL_LIBRARIES}
-    ${ATOMSPACE_LIBRARIES}
-)
-
-if(PLN_FOUND)
-    target_link_libraries(agentzero-knowledge ${PLN_LIBRARIES})
-    target_compile_definitions(agentzero-knowledge PRIVATE HAVE_PLN)
+# Shim must precede monorepo include/ so partial stubs do not win.
+if(AGENTZERO_KNOWLEDGE_USE_SHIM)
+    set(AGENTZERO_SHIM_DIR "${COGZERO_ROOT}/agentzero-core/shim")
+    target_include_directories(agentzero-knowledge
+        PUBLIC
+            $<BUILD_INTERFACE:${AGENTZERO_SHIM_DIR}>
+            $<BUILD_INTERFACE:${COGZERO_ROOT}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+    target_compile_definitions(agentzero-knowledge PUBLIC AGENTZERO_KNOWLEDGE_SHIM=1)
+else()
+    target_include_directories(agentzero-knowledge
+        PUBLIC
+            $<BUILD_INTERFACE:${COGZERO_ROOT}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+    target_include_directories(agentzero-knowledge
+        PUBLIC
+            ${COGUTIL_INCLUDE_DIRS}
+            ${ATOMSPACE_INCLUDE_DIRS}
+    )
+    target_link_directories(agentzero-knowledge
+        PUBLIC
+            ${COGUTIL_LIBRARY_DIRS}
+            ${ATOMSPACE_LIBRARY_DIRS}
+    )
+    target_link_libraries(agentzero-knowledge
+        PUBLIC
+            ${COGUTIL_LIBRARIES}
+            ${ATOMSPACE_LIBRARIES}
+    )
 endif()
 
-if(URE_FOUND)
-    target_link_libraries(agentzero-knowledge ${URE_LIBRARIES})
-    target_compile_definitions(agentzero-knowledge PRIVATE HAVE_URE)
+target_link_libraries(agentzero-knowledge PUBLIC Threads::Threads)
+
+if(AGENTZERO_KNOWLEDGE_HAVE_PLN)
+    target_link_libraries(agentzero-knowledge PUBLIC ${PLN_LIBRARIES})
+    target_compile_definitions(agentzero-knowledge PRIVATE HAVE_PLN=1)
+endif()
+if(AGENTZERO_KNOWLEDGE_HAVE_URE)
+    target_link_libraries(agentzero-knowledge PUBLIC ${URE_LIBRARIES})
+    target_compile_definitions(agentzero-knowledge PRIVATE HAVE_URE=1)
+endif()
+if(AGENTZERO_KNOWLEDGE_HAVE_MINER)
+    target_link_libraries(agentzero-knowledge PUBLIC ${MINER_LIBRARIES})
+    target_compile_definitions(agentzero-knowledge PRIVATE HAVE_MINER=1)
 endif()
 
 set_target_properties(agentzero-knowledge PROPERTIES
-    VERSION ${PROJECT_VERSION}
+    VERSION 0.1.0
     SOVERSION 1
     OUTPUT_NAME "agentzero-knowledge"
+    POSITION_INDEPENDENT_CODE ON
 )
 
 include(GNUInstallDirs)
@@ -83,4 +134,12 @@ install(TARGETS agentzero-knowledge
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
-message(STATUS "agentzero-knowledge configured (PLN: ${PLN_FOUND}, URE: ${URE_FOUND})")
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+if(BUILD_TESTING OR AGENTZERO_KNOWLEDGE_STANDALONE_BUILD)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+message(STATUS "agentzero-knowledge configured (shim=${AGENTZERO_KNOWLEDGE_USE_SHIM}, PLN=${AGENTZERO_KNOWLEDGE_HAVE_PLN}, URE=${AGENTZERO_KNOWLEDGE_HAVE_URE}, miner=${AGENTZERO_KNOWLEDGE_HAVE_MINER})")

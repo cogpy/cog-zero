@@ -19,6 +19,7 @@
 #include <mutex>
 #include <functional>
 #include <optional>
+#include <chrono>
 
 #include <opencog/atomspace/AtomSpace.h>
 #include <opencog/atoms/base/Handle.h>

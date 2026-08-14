@@ -22,6 +22,11 @@ public:
     virtual ~Value() = default;
     Type get_type() const { return _type; }
     virtual std::string to_string(const std::string& = "") const { return "Value"; }
+
+    // TruthValue-compatible accessors (overridden by FloatValue TVs)
+    virtual double get_mean() const { return 1.0; }
+    virtual double get_confidence() const { return 0.0; }
+    virtual double get_strength() const { return get_mean(); }
 protected:
     Type _type;
 };
@@ -34,6 +39,12 @@ public:
     size_t size() const { return _value.size(); }
     std::string to_string(const std::string& = "") const override {
         return "FloatValue";
+    }
+    double get_mean() const override {
+        return _value.empty() ? 1.0 : _value[0];
+    }
+    double get_confidence() const override {
+        return _value.size() > 1 ? _value[1] : 0.0;
     }
 private:
     std::vector<double> _value;

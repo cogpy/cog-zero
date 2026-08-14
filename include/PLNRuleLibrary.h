@@ -18,6 +18,7 @@
 #include <set>
 #include <functional>
 #include <mutex>
+#include <optional>
 
 #include <opencog/atomspace/AtomSpace.h>
 #include <opencog/atoms/base/Handle.h>

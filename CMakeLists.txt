@@ -169,11 +169,8 @@ if(BUILD_OPENCOG_MODULES)
     add_subdirectory(agentzero-perception)
 
     # Phase 3: Knowledge & Reasoning (depends on core)
-    if(PLN_FOUND AND URE_FOUND)
-        add_subdirectory(agentzero-knowledge)
-    else()
-        message(STATUS "Skipping agentzero-knowledge: PLN/URE dependencies not found")
-    endif()
+    # Optional pln/ure/miner enable HAVE_* flags; built-in fallbacks always work
+    add_subdirectory(agentzero-knowledge)
 
     # Phase 4: Planning & Goals (depends on core)
     # Planning module works with or without spacetime; spacetime enables full spatial-temporal features
@@ -278,14 +275,16 @@ if(BUILD_OPENCOG_MODULES)
     )
 endif()
 
-# Phase 1 agentzero-core and Phase 2 agentzero-perception — build with real
-# OpenCog or in-tree AtomSpace shim. Always available so module tests can run
-# under CTest without system OpenCog packages installed.
+# Phase 1–3 modules — build with real OpenCog or in-tree AtomSpace shim.
+# Always available so module tests can run under CTest without system
+# OpenCog packages installed.
 if(NOT BUILD_OPENCOG_MODULES)
     message(STATUS "Adding agentzero-core with AtomSpace shim (OpenCog modules disabled)")
     add_subdirectory(agentzero-core)
     message(STATUS "Adding agentzero-perception with AtomSpace shim (OpenCog modules disabled)")
     add_subdirectory(agentzero-perception)
+    message(STATUS "Adding agentzero-knowledge with AtomSpace shim (OpenCog modules disabled)")
+    add_subdirectory(agentzero-knowledge)
 endif()
 
 # Standalone cog0 application (no OpenCog dependencies required)
