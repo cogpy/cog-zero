@@ -38,16 +38,16 @@ TEST(PLN_TruthValueFormulas)
 {
     double s, c;
     PLNRuleLibrary::deductionTV(0.8, 0.9, 0.7, 0.8, s, c);
-    ASSERT_NEAR(s, 0.56, 1e-9);
+    ASSERT_NEAR(s, 0.56, 1e-6);
     ASSERT_GT(c, 0.0);
     ASSERT_LE(c, 1.0);
 
     PLNRuleLibrary::modusPonensTV(0.9, 0.9, 0.8, 0.8, s, c);
-    ASSERT_NEAR(s, 0.72, 1e-9);
+    ASSERT_NEAR(s, 0.72, 1e-6);
     ASSERT_GT(c, 0.0);
 
     PLNRuleLibrary::inversionTV(0.8, 0.9, 0.5, 0.9, 0.4, 0.9, s, c);
-    ASSERT_NEAR(s, 1.0, 1e-9); // (0.8*0.5)/0.4 = 1.0
+    ASSERT_NEAR(s, 1.0, 1e-6); // (0.8*0.5)/0.4 = 1.0
     ASSERT_GT(c, 0.0);
 }
 

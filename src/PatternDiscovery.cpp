@@ -310,8 +310,8 @@ std::vector<DiscoveredPattern> PatternDiscovery::mineRecentPatterns(
             if (r.timestamp >= since) recent.push_back(r);
     }
 
-    std::lock_guard<std::mutex> lock(_mutex);
-    return minePatternsFrom(recent, config, /*update_cache=*/true);
+    // Do not overwrite the full-corpus cache with a partial recent slice.
+    return minePatternsFrom(recent, config, /*update_cache=*/false);
 }
 
 std::vector<DiscoveredPattern> PatternDiscovery::updatePatterns(const Handle& root)
