@@ -305,8 +305,7 @@ SpaceTimeIntegrator::findOptimalTimeWindow(
             result.feasible = true;
             // reserve
             for (const auto& req : spatial_requirements) {
-                // non-const cast path: insert via copy of this
-                const_cast<SpaceTimeIntegrator*>(this)->insertAtomAtLocation(
+                insertAtomAtLocation(
                     action_atom != Handle::UNDEFINED ? action_atom : req.atom,
                     req.location, t);
             }

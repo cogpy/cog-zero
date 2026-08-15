@@ -316,7 +316,7 @@ bool TemporalReasoner::resolveTemporalConflicts(
             return false;
         }
     }
-    return findTemporalConflicts({}).empty() || true;
+    return findTemporalConflicts({}).empty();
 }
 
 std::vector<Handle>

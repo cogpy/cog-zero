@@ -461,7 +461,10 @@ Handle PlanningEngine::createPlanAtom(const Plan& plan)
     if (!plan.action_sequence.empty()) {
         Handle list = _atomspace->add_link(LIST_LINK, plan.action_sequence);
         Handle ap = _atomspace->add_node(PREDICATE_NODE, "plan-actions");
-        _atomspace->add_link(EVALUATION_LINK, {ap, plan_atom, list});
+        _atomspace->add_link(EVALUATION_LINK, {
+            ap,
+            _atomspace->add_link(LIST_LINK, {plan_atom, list})
+        });
     }
     plan_atom->setTruthValue(SimpleTruthValue::createTV(plan.confidence, 1.0));
     _atomspace->add_link(MEMBER_LINK, {plan_atom, _planning_context});
