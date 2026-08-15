@@ -285,6 +285,8 @@ if(NOT BUILD_OPENCOG_MODULES)
     add_subdirectory(agentzero-perception)
     message(STATUS "Adding agentzero-knowledge with AtomSpace shim (OpenCog modules disabled)")
     add_subdirectory(agentzero-knowledge)
+    message(STATUS "Adding agentzero-planning with AtomSpace shim (OpenCog modules disabled)")
+    add_subdirectory(agentzero-planning)
 endif()
 
 # Standalone cog0 application (no OpenCog dependencies required)
