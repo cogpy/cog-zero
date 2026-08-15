@@ -253,7 +253,19 @@ private:
     /**
      * Build the support map: atom → set of episode indices that contain it.
      */
-    std::map<Handle, std::set<size_t>> buildSupportMap(size_t max_depth) const;
+    std::map<Handle, std::set<size_t>> buildSupportMap(
+        const std::vector<EpisodeRecord>& episodes,
+        size_t max_depth) const;
+
+    /**
+     * Mine patterns from an explicit episode corpus (does not mutate _episodes).
+     * Caller must hold _mutex if updating _cached_patterns is desired via
+     * the update_cache flag.
+     */
+    std::vector<DiscoveredPattern> minePatternsFrom(
+        const std::vector<EpisodeRecord>& episodes,
+        const MiningConfig& config,
+        bool update_cache) const;
 
     /**
      * Generate abstract patterns by replacing leaf node names in `templ`
@@ -286,7 +298,7 @@ private:
     mutable std::mutex _mutex;
 
     std::vector<EpisodeRecord> _episodes;
-    std::vector<DiscoveredPattern> _cached_patterns;
+    mutable std::vector<DiscoveredPattern> _cached_patterns;
 };
 
 } // namespace knowledge
