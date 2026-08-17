@@ -328,14 +328,14 @@ void ExperienceManager::consolidateMemory()
         }
     }
 
-    // Sort indices descending so removal doesn't shift remaining indices
+    // Sort indices descending so erasure does not invalidate remaining indices.
+    // Indices are fully rebuilt after the bulk erase (cheaper than per-element
+    // index surgery when many entries are removed).
     std::sort(to_remove.rbegin(), to_remove.rend());
     for (size_t idx : to_remove) {
-        removeExperienceFromIndices(idx);
         _experiences.erase(_experiences.begin() + static_cast<long>(idx));
     }
 
-    // Rebuild indices completely after bulk removal
     _experience_index.clear();
     _type_index.clear();
     _context_index.clear();
