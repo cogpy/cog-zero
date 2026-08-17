@@ -210,14 +210,15 @@ bool AgentComms::sendMessage(const AgentMessage& message)
     if (msg.timestamp.time_since_epoch().count() == 0)
         msg.timestamp = std::chrono::system_clock::now();
 
+    // AtomSpace write + counter update happen before any inbox deliver so we
+    // never call deliver() (which locks _mutex) while already holding it.
     msg.atom = storeMessageAtom(msg);
-
     {
         std::lock_guard<std::mutex> lock(_mutex);
         ++_sent_count;
     }
 
-    // Loopback to self
+    // Loopback to self / broadcast marker (deliver acquires _mutex itself).
     if (msg.recipient_id == _agent_id || msg.recipient_id == "*") {
         deliver(msg);
     }
@@ -239,10 +240,11 @@ bool AgentComms::broadcast(const std::string& content, MessageType type)
 {
     if (content.empty()) return false;
     AgentMessage msg = makeMessage("*", content, type, MessagePriority::NORMAL);
-    // Fan-out to all registered peers via AtomSpace log + local deliver
+    // Fan-out via AtomSpace log + local deliver. Keep storeMessageAtom outside
+    // _mutex so deliver() never nests the same non-recursive lock.
+    msg.atom = storeMessageAtom(msg);
     {
         std::lock_guard<std::mutex> lock(_mutex);
-        msg.atom = storeMessageAtom(msg);
         ++_sent_count;
     }
     // Always deliver a copy to self so dispatch/tests observe broadcasts.

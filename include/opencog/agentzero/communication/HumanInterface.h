@@ -104,7 +104,6 @@ private:
     std::string trim(const std::string& s) const;
     std::string formatResponse(const std::string& raw) const;
     HumanSession* requireSession(const std::string& session_id);
-    std::string ensureDefaultSession();
 };
 
 } // namespace communication

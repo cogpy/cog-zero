@@ -116,7 +116,8 @@ Conversation* DialogueManager::getOrCreate(const std::string& conversation_id,
     Handle conv_node = _atomspace->add_node(CONCEPT_NODE, "conversation:" + conversation_id);
     _atomspace->add_link(MEMBER_LINK, conv_node, _dialogue_root);
 
-    auto [ins, _] = _conversations.emplace(conversation_id, std::move(conv));
+    auto [ins, inserted] = _conversations.emplace(conversation_id, std::move(conv));
+    (void)inserted;
     return &ins->second;
 }
 

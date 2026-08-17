@@ -151,32 +151,20 @@ std::string HumanInterface::processInput(const std::string& session_id,
     std::string text = trim(input);
     if (text.empty()) return formatResponse("Please enter a non-empty message.");
 
-    HumanSession* session = nullptr;
+    std::string conversation_id;
+    std::string user_id;
     {
         std::lock_guard<std::mutex> lock(_mutex);
-        session = requireSession(session_id);
+        HumanSession* session = requireSession(session_id);
         if (!session) return formatResponse("Session is not active.");
         session->last_activity = std::chrono::system_clock::now();
         ++session->turn_count;
+        conversation_id = session->conversation_id;
+        user_id = session->user_id;
     }
 
-    std::string reply = _dialogue->processMessage(
-        session->conversation_id, session->user_id, text);
+    std::string reply = _dialogue->processMessage(conversation_id, user_id, text);
     return formatResponse(reply);
-}
-
-std::string HumanInterface::ensureDefaultSession()
-{
-    std::lock_guard<std::mutex> lock(_mutex);
-    if (!_default_session_id.empty()) {
-        auto it = _sessions.find(_default_session_id);
-        if (it != _sessions.end() && it->second.active)
-            return _default_session_id;
-    }
-    // Create without re-entering startSession's lock: inline minimal path
-    // Release and call startSession
-    // (drop lock via scope end)
-    return "";
 }
 
 std::string HumanInterface::processHumanInput(const std::string& input)
