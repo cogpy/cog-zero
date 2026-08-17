@@ -177,12 +177,8 @@ if(BUILD_OPENCOG_MODULES)
     add_subdirectory(agentzero-planning)
 
     # Phase 5: Learning & Adaptation (depends on core)
-    # Note: agentzero-learning now exists and integrates MOSES for policy optimization (AZ-LEARN-003)
-    if(MOSES_FOUND)
-        add_subdirectory(agentzero-learning)
-    else()
-        message(STATUS "Skipping agentzero-learning: MOSES dependency not found")
-    endif()
+    # Optional moses enables HAVE_MOSES; GA fallback always works
+    add_subdirectory(agentzero-learning)
 
     # Phase 6: Communication & NLP (depends on core)
     # Note: HumanInterface (AZ-HUMAN-001) has basic functionality without lg-atomese
