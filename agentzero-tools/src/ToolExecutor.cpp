@@ -102,28 +102,34 @@ ToolExecutor::~ToolExecutor()
 // ---------------------------------------------------------------------------
 // execute()
 // ---------------------------------------------------------------------------
-NormalisedResult ToolExecutor::execute(ToolWrapper& tool,
+NormalisedResult ToolExecutor::execute(std::shared_ptr<ToolWrapper> tool,
                                        const ToolExecutionContext& context,
                                        const SandboxPolicy& policy)
 {
-    logger().info() << "[ToolExecutor] Executing tool: " << tool.getToolName();
+    if (!tool) {
+        NormalisedResult r;
+        r.success = false;
+        r.error = "ToolExecutor::execute requires a non-null ToolWrapper";
+        logger().error() << "[ToolExecutor] " << r.error;
+        updateStats(r);
+        return r;
+    }
 
-    // Capture by value so a timed-out worker does not reference caller stack frames.
-    // ToolWrapper is held via shared_ptr alias; callers must keep `tool` alive until
-    // this ToolExecutor is destroyed (destructor joins timed-out workers).
-    auto tool_ptr = std::shared_ptr<ToolWrapper>(&tool, [](ToolWrapper*) {});
+    logger().info() << "[ToolExecutor] Executing tool: " << tool->getToolName();
+
+    // Capture shared ownership + context by value so timed-out workers are safe.
     ToolExecutionContext ctx = context;
-    auto fn = [this, tool_ptr, ctx]() -> NormalisedResult {
-        ToolResult raw = tool_ptr->execute(ctx);
+    auto fn = [this, tool, ctx]() -> NormalisedResult {
+        ToolResult raw = tool->execute(ctx);
         return normalise(raw);
     };
 
     NormalisedResult result = runWithTimeout(fn, policy.timeout_ms);
-    result.metadata["tool_name"] = tool.getToolName();
-    result.metadata["tool_type"] = std::to_string(static_cast<int>(tool.getToolType()));
+    result.metadata["tool_name"] = tool->getToolName();
+    result.metadata["tool_type"] = std::to_string(static_cast<int>(tool->getToolType()));
 
     if (_atomspace) {
-        recordInAtomSpace(result, tool.getToolName());
+        recordInAtomSpace(result, tool->getToolName());
     }
 
     updateStats(result);

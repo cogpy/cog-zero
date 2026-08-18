@@ -100,15 +100,15 @@ public:
      * Execute a ToolWrapper in a sandboxed environment
      *
      * On timeout the worker may continue in the background until this
-     * ToolExecutor is destroyed. Callers must keep `tool` alive at least
-     * until the executor is destroyed when timeouts are possible.
+     * ToolExecutor is destroyed. Ownership is shared via `tool` so the
+     * wrapper remains valid for any timed-out worker.
      *
-     * @param tool     Tool to execute (mutated only via its internal stats)
+     * @param tool     Tool to execute (shared ownership for timeout safety)
      * @param context  Execution context supplying parameters and input atoms
      * @param policy   Sandbox security / resource policy
      * @return         Normalised result
      */
-        NormalisedResult execute(ToolWrapper& tool,
+        NormalisedResult execute(std::shared_ptr<ToolWrapper> tool,
                             const ToolExecutionContext& context,
                             const SandboxPolicy& policy = SandboxPolicy{});
 

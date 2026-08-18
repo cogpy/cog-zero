@@ -57,7 +57,7 @@ TEST(ToolsPipeline_RestAndRosIntegration)
     SandboxPolicy policy;
     policy.timeout_ms = 1000.0;
     policy.allow_network_access = true;
-    NormalisedResult nr = executor.execute(*rest_tool, ctx, policy);
+    NormalisedResult nr = executor.execute(rest_tool, ctx, policy);
     ASSERT_GE(executor.getExecutionCount(), 1);
     ASSERT_FALSE(nr.toJSON().empty());
 
@@ -69,7 +69,7 @@ TEST(ToolsPipeline_RestAndRosIntegration)
     auto ros_tool = ros.createTopicPublisherTool("pipeline_pub", "/pipeline");
     ToolExecutionContext rctx(as);
     rctx.setParameter("data", "from-executor");
-    NormalisedResult nros = executor.execute(*ros_tool, rctx, policy);
+    NormalisedResult nros = executor.execute(ros_tool, rctx, policy);
     ASSERT_GE(executor.getExecutionCount(), 2);
     ASSERT_FALSE(nros.toString().empty());
 }

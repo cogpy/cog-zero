@@ -538,7 +538,7 @@ std::shared_ptr<ResourcePool> ResourceManager::selectPoolForAllocation(ResourceT
         }
         
         case OptimizationStrategy::PRIORITY_BASED:
-        case OptimizationStrategy::ADAPTIVE:
+        case OptimizationStrategy::ADAPTIVE: {
             // For now, fall back to balanced strategy
             // These can be extended with priority metadata or adaptive learning
             double min_usage = std::numeric_limits<double>::max();
@@ -552,6 +552,7 @@ std::shared_ptr<ResourcePool> ResourceManager::selectPoolForAllocation(ResourceT
                 }
             }
             break;
+        }
     }
     
     return selected_pool;

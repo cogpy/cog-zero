@@ -1,4 +1,5 @@
 #include "test_runner.h"
+#include <memory>
 
 #include <opencog/agentzero/tools/ToolExecutor.h>
 #include <opencog/agentzero/tools/ToolWrapper.h>
@@ -64,9 +65,9 @@ TEST(ToolExecutor_ExecuteWrapper)
     auto as = make_as();
     ToolExecutor exec(as);
 
-    ToolWrapper tool("unit_echo", ToolType::CUSTOM);
-    tool.setAtomSpace(as);
-    tool.setDescription("echo parameters");
+    auto tool = std::make_shared<ToolWrapper>("unit_echo", ToolType::CUSTOM);
+    tool->setAtomSpace(as);
+    tool->setDescription("echo parameters");
     // CUSTOM tools still produce a structured result via ToolWrapper
     ToolExecutionContext ctx(as);
     ctx.setParameter("msg", "ping");
