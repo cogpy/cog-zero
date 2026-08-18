@@ -86,35 +86,53 @@ std::string DistributedCoordinator::submitTask(const std::string& task_type,
                                               Handle task_atom)
 {
     std::string task_id = generateTaskId();
-    
-    // Select optimal node for this task
-    std::string selected_node = selectNodeForTask(task_type);
-    
+    std::string selected_node;
+
+    // Select node and bump load under one lock to avoid TOCTOU races where the
+    // chosen node is unregistered between selection and load update.
+    {
+        std::lock_guard<std::mutex> lock(nodes_mutex_);
+        if (!nodes_.empty()) {
+            int min_load = INT_MAX;
+            for (const auto& pair : nodes_) {
+                if (pair.second.is_active && pair.second.current_load < min_load) {
+                    min_load = pair.second.current_load;
+                    selected_node = pair.first;
+                }
+            }
+            if (!selected_node.empty()) {
+                auto it = nodes_.find(selected_node);
+                if (it != nodes_.end()) {
+                    it->second.current_load += 1;
+                    if (it->second.current_load < 0) {
+                        it->second.current_load = 0;
+                    }
+                }
+            }
+        }
+    }
+
     if (selected_node.empty()) {
         logger_.error("No available node for task type: %s", task_type.c_str());
         return "";
     }
-    
-    // Create task
+
     DistributedTask task(task_id, task_type, task_atom);
     task.assigned_node = selected_node;
-    
+
     {
         std::lock_guard<std::mutex> lock(tasks_mutex_);
         tasks_[task_id] = task;
     }
-    
-    // Update node load
-    updateNodeLoad(selected_node, 1);
-    
+
     logger_.info("Submitted task %s (type: %s) to node %s",
                 task_id.c_str(), task_type.c_str(), selected_node.c_str());
-    
+
     // Store task in AtomSpace
     Handle task_node = atomspace_->add_node(CONCEPT_NODE, "Task:" + task_id);
     Handle type_node = atomspace_->add_node(CONCEPT_NODE, task_type);
     atomspace_->add_link(INHERITANCE_LINK, {task_node, type_node});
-    
+
     return task_id;
 }
 

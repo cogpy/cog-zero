@@ -126,7 +126,7 @@ std::map<std::string, double> LoadBalancer::getLoadStats() const
     // Calculate statistics
     double total_load = 0.0;
     double max_load = 0.0;
-    double min_load = 100.0;
+    double min_load = static_cast<double>(node_loads_.begin()->second);
     
     for (const auto& pair : node_loads_) {
         total_load += pair.second;
