@@ -35,8 +35,15 @@ make -j$(nproc)
 # Execute an rc-style script file
 ./cog0 --script my_agent.cog0
 
-# Execute a single command inline
-./cog0 --eval "goal explore-world Explore the environment"
+# Execute command(s) inline ('; separates commands)
+./cog0 --eval "goal explore-world Explore the environment; run 3"
+
+# Batch / programmatic mode — JSON status on stdout, no prompts
+./cog0 --batch --script my_agent.cog0
+./cog0 --batch --eval "goal patrol; run 5"
+
+# Disable ANSI colour (also auto-disabled in --batch / non-TTY)
+./cog0 --no-color
 ```
 
 ### Interactive Commands
@@ -50,9 +57,16 @@ cog0> run [N]                      Run N cognitive cycles (default: 1)
 cog0> infer                        Run one forward-chaining inference pass
 cog0> status                       Print agent status
 cog0> atoms                        List all atoms in the knowledge store
+cog0> save  <file>                 Save AtomStore snapshot to file
+cog0> load  <file>                 Load AtomStore snapshot from file
+cog0> rule  <name> if-exists <concept> then-add <concept>
+                                   Register an inference rule
 cog0> help                         Show command reference
 cog0> quit                         Exit
 ```
+
+Tab-completion of command names is available when built with GNU readline
+(`USE_READLINE=ON`, the default when `libreadline-dev` is installed).
 
 ### Script Files (rc-style)
 
@@ -65,11 +79,13 @@ goal learn-about-opencog Understand the OpenCog ecosystem
 percept AtomSpace is a hypergraph knowledge store
 task summarise-components Summarise key OpenCog components
 run 5
+save state.snap
 status
 ```
 
 ```bash
 ./cog0 --script my_agent.cog0
+./cog0 --batch --script my_agent.cog0   # JSON status for CI / tooling
 ```
 
 ### Run Tests
@@ -376,8 +392,12 @@ See [ROADMAP.md](ROADMAP.md) for the full development roadmap.
 ### Completed
 - [x] Standalone CLI application (`cog0`) with interactive REPL
 - [x] rc-style script file execution (`--script`)
-- [x] Inline command evaluation (`--eval`)
-- [x] Comprehensive unit + e2e test suite (210+ tests, 0 failures)
+- [x] Inline command evaluation (`--eval`, semicolon-separated multi-command)
+- [x] `--batch` mode with JSON status output for programmatic use
+- [x] `save` / `load` AtomStore snapshot commands
+- [x] Interactive `rule` registration and on-demand `infer`
+- [x] Colour output with `--no-color` toggle; optional readline tab-completion
+- [x] Comprehensive unit + e2e + CLI smoke test suite (210+ tests, 0 failures)
 - [x] Full cognitive architecture Phases 1–14 implemented
 - [x] `goals` and `infer` REPL commands for introspection and on-demand inference
 - [x] Raft-based distributed consensus for `MultiAgentCoordinator`
