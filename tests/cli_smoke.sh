@@ -38,6 +38,18 @@ check() {
     fi
 }
 
+# Paths embedded in cog0 scripts are read by the native binary (MSVC on
+# Windows CI). Git Bash/MSYS only auto-converts paths in argv, not file
+# contents — so a Unix path like /tmp/... inside a script fails to open.
+# Convert to a mixed Windows path (C:/...) when cygpath is available.
+to_native_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -m -- "$1"
+    else
+        printf '%s' "$1"
+    fi
+}
+
 json_field() {
     # Extract a bare numeric field: json_field rules path.json -> 3
     local key="$1" file="$2"
@@ -63,18 +75,20 @@ check "batch_no_info_on_stdout" bash -c "! grep -q '\\[INFO' '$out'"
 # 2. save / load round-trip via --script
 # -----------------------------------------------------------------------
 snap="$WORKDIR/store.snap"
+# Bash checks use $snap (POSIX path); cog0 script commands use $snap_native.
+snap_native="$(to_native_path "$snap")"
 cat >"$WORKDIR/save.cog0" <<EOF
 goal keep Keep state
 percept hello world
 run 1
-save $snap
+save $snap_native
 EOF
 "$COG0" --batch --script "$WORKDIR/save.cog0" >"$WORKDIR/save.json" 2>/dev/null
 check "save_creates_snapshot" test -s "$snap"
 check "save_snapshot_header" grep -q 'cog0-atomstore-snapshot v1' "$snap"
 
 cat >"$WORKDIR/load.cog0" <<EOF
-load $snap
+load $snap_native
 run 1
 EOF
 "$COG0" --batch --script "$WORKDIR/load.cog0" >"$WORKDIR/load.json" 2>/dev/null
