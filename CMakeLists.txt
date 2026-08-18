@@ -272,6 +272,10 @@ endif()
 # Always available so module tests can run under CTest without system
 # OpenCog packages installed.
 if(NOT BUILD_OPENCOG_MODULES)
+    # Ensure CTest discovers module tests even when the standalone app is disabled.
+    if(BUILD_TESTING)
+        enable_testing()
+    endif()
     message(STATUS "Adding agentzero-core with AtomSpace shim (OpenCog modules disabled)")
     add_subdirectory(agentzero-core)
     message(STATUS "Adding agentzero-perception with AtomSpace shim (OpenCog modules disabled)")
@@ -286,6 +290,8 @@ if(NOT BUILD_OPENCOG_MODULES)
     add_subdirectory(agentzero-communication)
     message(STATUS "Adding agentzero-memory with AtomSpace shim (OpenCog modules disabled)")
     add_subdirectory(agentzero-memory)
+    message(STATUS "Adding agentzero-tools with AtomSpace shim (OpenCog modules disabled)")
+    add_subdirectory(agentzero-tools)
 endif()
 
 # Standalone cog0 application (no OpenCog dependencies required)

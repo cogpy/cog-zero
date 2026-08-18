@@ -1,14 +1,17 @@
 /*
- * Minimal Logger shim compatible with OpenCog logger() streaming API
- * and simple string overloads used by some Agent-Zero sources.
+ * Minimal Logger shim compatible with OpenCog logger() streaming API,
+ * simple string overloads, and printf-style format calls used by some
+ * Agent-Zero sources (CapabilityComposer, ResourceManager, etc.).
  */
 #ifndef _AGENTZERO_SHIM_LOGGER_H
 #define _AGENTZERO_SHIM_LOGGER_H
 
+#include <cstdarg>
+#include <cstdio>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <string>
-#include <mutex>
 
 namespace opencog {
 
@@ -66,9 +69,22 @@ public:
     void debug(const std::string& msg) { emit(DEBUG, msg); }
     void fine(const std::string& msg)  { emit(FINE, msg); }
 
-    // Support logger().error() << x and also char* via template above.
-    // For ambiguous cases where code does logger().info() without <<,
-    // LogStream destructor emits empty string — fine.
+    // Printf-style API matching real OpenCog logger: logger().info("x=%d", n)
+    void error(const char* fmt, ...) {
+        va_list ap; va_start(ap, fmt); emitf(ERROR, fmt, ap); va_end(ap);
+    }
+    void warn(const char* fmt, ...) {
+        va_list ap; va_start(ap, fmt); emitf(WARN, fmt, ap); va_end(ap);
+    }
+    void info(const char* fmt, ...) {
+        va_list ap; va_start(ap, fmt); emitf(INFO, fmt, ap); va_end(ap);
+    }
+    void debug(const char* fmt, ...) {
+        va_list ap; va_start(ap, fmt); emitf(DEBUG, fmt, ap); va_end(ap);
+    }
+    void fine(const char* fmt, ...) {
+        va_list ap; va_start(ap, fmt); emitf(FINE, fmt, ap); va_end(ap);
+    }
 
     void emit(Level level, const std::string& msg) {
         if (!_to_stdout || msg.empty()) return;
@@ -87,6 +103,12 @@ public:
     }
 
 private:
+    void emitf(Level level, const char* fmt, va_list ap) {
+        char buf[4096];
+        vsnprintf(buf, sizeof(buf), fmt, ap);
+        emit(level, std::string(buf));
+    }
+
     Level _level = WARN; // quieter default for tests
     bool _to_stdout = false;
     std::mutex _mu;

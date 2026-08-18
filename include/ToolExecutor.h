@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <functional>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -98,12 +99,16 @@ public:
     /**
      * Execute a ToolWrapper in a sandboxed environment
      *
-     * @param tool     Tool to execute (mutated only via its internal stats)
+     * On timeout the worker may continue in the background until this
+     * ToolExecutor is destroyed. Ownership is shared via `tool` so the
+     * wrapper remains valid for any timed-out worker.
+     *
+     * @param tool     Tool to execute (shared ownership for timeout safety)
      * @param context  Execution context supplying parameters and input atoms
      * @param policy   Sandbox security / resource policy
      * @return         Normalised result
      */
-    NormalisedResult execute(ToolWrapper& tool,
+    NormalisedResult execute(std::shared_ptr<ToolWrapper> tool,
                              const ToolExecutionContext& context,
                              const SandboxPolicy& policy = SandboxPolicy{});
 
@@ -172,6 +177,10 @@ private:
     std::atomic<int> _success_count{0};
     std::atomic<int> _failure_count{0};
     std::atomic<int> _timeout_count{0};
+
+    // Futures for workers that outlived their timeout; joined in the destructor.
+    mutable std::mutex _pending_mutex;
+    std::vector<std::shared_ptr<std::future<NormalisedResult>>> _pending_futures;
 
     // Internal helpers
     NormalisedResult runWithTimeout(std::function<NormalisedResult()> fn,

@@ -14,6 +14,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 
@@ -325,6 +326,13 @@ private:
     RosConnectionState _connection_state{RosConnectionState::DISCONNECTED};
     bool _simulation_mode{true};
     std::string _master_uri;
+
+    // Shared gate so ToolWrapper executors can detect bridge destruction safely.
+    struct LifetimeGate {
+        std::shared_mutex mutex;
+        RosBehaviorBridge* ptr{nullptr};
+    };
+    std::shared_ptr<LifetimeGate> _lifetime;
 
     // subscription_id -> {topic, callback}
     std::map<std::string, std::pair<std::string, MessageCallback>> _subscriptions;

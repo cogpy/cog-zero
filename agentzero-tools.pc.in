@@ -1,0 +1,11 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: agentzero-tools
+Description: Agent-Zero External Tool Integration Module
+Version: @PROJECT_VERSION@
+Requires: cogutil atomspace
+Libs: -L${libdir} -lagentzero-tools
+Cflags: -I${includedir}

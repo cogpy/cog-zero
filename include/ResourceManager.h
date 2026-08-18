@@ -110,7 +110,7 @@ private:
     ResourceStatus _status;
     std::vector<std::shared_ptr<ResourceAllocation>> _allocations;
     std::map<std::string, double> _usage_history;
-    std::mutex _pool_mutex;
+    mutable std::mutex _pool_mutex;
     
     // Resource limits
     double _warning_threshold;      // Percentage for warning
@@ -235,7 +235,7 @@ private:
     std::map<ResourceType, double> _total_usage_by_type;
     
     // Thread safety
-    mutable std::mutex _manager_mutex;
+    mutable std::recursive_mutex _manager_mutex;
     
     // Internal methods
     void initializeManagerAtom();
