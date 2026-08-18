@@ -10,13 +10,34 @@
 #include "cog0/GrpcAgentClient.h"
 #include "cog0/AgentServiceJson.h"
 
-#include <arpa/inet.h>
 #include <cstring>
-#include <netdb.h>
-#include <netinet/in.h>
 #include <sstream>
-#include <sys/socket.h>
-#include <unistd.h>
+
+// POSIX / Winsock socket headers
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#  pragma comment(lib, "Ws2_32.lib")
+#  define CLOSE_SOCKET closesocket
+#  ifndef MSG_NOSIGNAL
+#    define MSG_NOSIGNAL 0
+#  endif
+#  ifndef SHUT_RDWR
+#    define SHUT_RDWR SD_BOTH
+#  endif
+using SocketIoResult = int;
+#else
+#  include <arpa/inet.h>
+#  include <netdb.h>
+#  include <netinet/in.h>
+#  include <sys/socket.h>
+#  include <unistd.h>
+#  define CLOSE_SOCKET close
+using SocketIoResult = ssize_t;
+#endif
 
 namespace cog0 {
 namespace {
@@ -26,6 +47,17 @@ using agent_json::extractBoolField;
 using agent_json::extractStringField;
 using agent_json::extractUint64Field;
 using agent_json::responseOk;
+
+#ifdef _WIN32
+bool ensureWinsock()
+{
+    static const bool ok = []() {
+        WSADATA wsa{};
+        return WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
+    }();
+    return ok;
+}
+#endif
 
 } // namespace
 

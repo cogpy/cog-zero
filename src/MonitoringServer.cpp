@@ -103,7 +103,9 @@ int MonitoringServer::_ioSend(int fd, TlsSocket* tls, const void* data, size_t l
     if (tls) {
         return tls->send(data, len);
     }
-    return static_cast<int>(::send(fd, data, static_cast<int>(len), 0));
+    // Winsock send() takes const char*; POSIX accepts const void*.
+    return static_cast<int>(::send(fd, static_cast<const char*>(data),
+                                   static_cast<int>(len), 0));
 }
 
 int MonitoringServer::_ioRecv(int fd, TlsSocket* tls, void* data, size_t len)
@@ -111,7 +113,9 @@ int MonitoringServer::_ioRecv(int fd, TlsSocket* tls, void* data, size_t len)
     if (tls) {
         return tls->recv(data, len);
     }
-    return static_cast<int>(::recv(fd, data, static_cast<int>(len), 0));
+    // Winsock recv() takes char*; POSIX accepts void*.
+    return static_cast<int>(::recv(fd, static_cast<char*>(data),
+                                   static_cast<int>(len), 0));
 }
 
 // =========================================================================
