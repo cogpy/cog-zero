@@ -452,13 +452,16 @@ bool CapabilityComposer::validateComposition(const CompositionPlan& plan)
     if (plan.capability_sequence.empty()) {
         return false;
     }
-    
+
     // Check all capabilities exist
-    for (const auto& cap_id : plan.capability_sequence) {
-        if (_capabilities.find(cap_id) == _capabilities.end()) {
-            logger().warn("CapabilityComposer: Plan references unknown capability %s", 
-                         cap_id.c_str());
-            return false;
+    {
+        std::lock_guard<std::mutex> lock(_capabilities_mutex);
+        for (const auto& cap_id : plan.capability_sequence) {
+            if (_capabilities.find(cap_id) == _capabilities.end()) {
+                logger().warn("CapabilityComposer: Plan references unknown capability %s",
+                             cap_id.c_str());
+                return false;
+            }
         }
     }
     

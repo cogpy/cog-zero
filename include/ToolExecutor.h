@@ -108,9 +108,9 @@ public:
      * @param policy   Sandbox security / resource policy
      * @return         Normalised result
      */
-        NormalisedResult execute(std::shared_ptr<ToolWrapper> tool,
-                            const ToolExecutionContext& context,
-                            const SandboxPolicy& policy = SandboxPolicy{});
+    NormalisedResult execute(std::shared_ptr<ToolWrapper> tool,
+                             const ToolExecutionContext& context,
+                             const SandboxPolicy& policy = SandboxPolicy{});
 
     /**
      * Execute a shell command in a sandboxed environment

@@ -23,6 +23,9 @@
 #include <opencog/util/Logger.h>
 
 #include <opencog/agentzero/tools/RosBehaviorBridge.h>
+#include <algorithm>
+#include <cmath>
+#include <sys/wait.h>
 
 using namespace opencog;
 using namespace opencog::agentzero::tools;
@@ -594,7 +597,7 @@ std::string RosBehaviorBridge::paramsToJson(
 std::string RosBehaviorBridge::runScript(const std::string& interpreter,
                                           const std::string& script_path,
                                           const std::vector<std::string>& args,
-                                          double /*timeout_ms*/,
+                                          double timeout_ms,
                                           bool* success_out)
 {
     // Helper lambda: shell-safe single-quote escaping (same approach as ToolExecutor)
@@ -618,6 +621,13 @@ std::string RosBehaviorBridge::runScript(const std::string& interpreter,
     for (const auto& arg : args) {
         cmd += " " + shell_quote(arg);
     }
+
+    // Enforce timeout via coreutils `timeout` when a positive limit is set.
+    // Falls back to unbounded popen if timeout_ms <= 0.
+    if (timeout_ms > 0.0) {
+        const int timeout_secs = std::max(1, static_cast<int>(std::ceil(timeout_ms / 1000.0)));
+        cmd = "timeout --signal=KILL " + std::to_string(timeout_secs) + "s " + cmd;
+    }
     cmd += " 2>&1";
 
     std::string output;
@@ -634,6 +644,12 @@ std::string RosBehaviorBridge::runScript(const std::string& interpreter,
     }
 
     int exit_code = pclose(pipe);
-    if (success_out) *success_out = (exit_code == 0);
+    // timeout(1) returns 124 when the command times out.
+    const bool ok = (exit_code == 0);
+    if (!ok && WIFEXITED(exit_code) && WEXITSTATUS(exit_code) == 124) {
+        logger().warn() << "[RosBehaviorBridge] script timed out after "
+                        << timeout_ms << "ms: " << script_path;
+    }
+    if (success_out) *success_out = ok;
     return output;
 }
