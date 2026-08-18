@@ -34,6 +34,10 @@ Welcome to the comprehensive documentation for Agent-Zero's C++ implementation i
 
 ### Operations & Deployment
 - [Deployment Guide](DEPLOYMENT_GUIDE.md) - Production deployment
+- [Production Deployment (Phase 14)](PRODUCTION_DEPLOYMENT.md) - TLS, monitoring, clustering
+- [gRPC Agent Interface](GRPC_GUIDE.md) - AgentService API and JSON fallback
+- [Migration Guide](MIGRATION_GUIDE.md) - Live agent state hand-off
+- [Dashboard Guide](DASHBOARD_GUIDE.md) - WebSocket monitoring UI
 - [Configuration Reference](CONFIGURATION.md) - System configuration
 - [Troubleshooting Guide](TROUBLESHOOTING.md) - Common issues and solutions
 
@@ -63,9 +67,10 @@ Welcome to the comprehensive documentation for Agent-Zero's C++ implementation i
 3. [Configuration Reference](CONFIGURATION.md)
 
 **For Operators:**
-1. [Deployment Guide](DEPLOYMENT_GUIDE.md)
-2. [Configuration Reference](CONFIGURATION.md)
-3. [Troubleshooting Guide](TROUBLESHOOTING.md)
+1. [Production Deployment (Phase 14)](PRODUCTION_DEPLOYMENT.md)
+2. [Deployment Guide](DEPLOYMENT_GUIDE.md)
+3. [Configuration Reference](CONFIGURATION.md)
+4. [Troubleshooting Guide](TROUBLESHOOTING.md)
 
 ### By Task
 

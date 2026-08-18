@@ -257,10 +257,10 @@ Complete the remaining Phase 12 deferred items plus new production-readiness wor
 
 ### Tasks
 - [x] **Agent migration** — live hand-off of agent state and active tasks between cluster nodes; implemented `Agent::serialize()` / `Agent::deserialize()` for full state roundtrip (atoms, goals, tasks, episodes); added `ClusterManager::initiateMigration()` / `receiveMigration()` / `getMigrationStatus()` for distributed migration protocol; 29 migration tests covering serialization roundtrip, state preservation, and error handling
-- [ ] **gRPC agent interface** — replace the current CogServer TCP protocol with a typed gRPC API for inter-module communication *(deferred — requires external `grpc` dependency)*
+- [x] **gRPC agent interface** — `proto/agent.proto` AgentService schema; `GrpcAgentServer` / `GrpcAgentClient` with length-prefixed JSON transport (zero-dep fallback); CMake `USE_GRPC` option probes for real gRPC when available; covers SetGoal, InjectPercept, RunCycles (streamed), GetStatus, QueryAtoms
 - [x] **WebSocket monitoring dashboard** — upgrade `MonitoringServer` with a WebSocket upgrade path for real-time push metrics and a minimal HTML/JS frontend served at `/dashboard`; implemented `WebSocketHandler` (RFC 6455 frame encoding/decoding, SHA-1, Base64), `DashboardAssets` (self-contained responsive HTML/JS), integrated WebSocket client management and periodic metrics broadcast; 39 WebSocket tests
 - [x] **Pluggable Raft log store** — implemented `RaftLogStore` abstract interface with `InMemoryLogStore` default implementation; integrated with `RaftNode` for state persistence (term, votedFor); factory function supports future RocksDB/SQLite backends; 21 persistence tests covering log operations, state recovery, and cluster integration
-- [ ] **TLS for MonitoringServer** — optional TLS via mbedTLS or OpenSSL for secure metric scraping in production deployments *(deferred — requires external TLS library)*
+- [x] **TLS for MonitoringServer** — optional OpenSSL TLS via `TlsSocket` / `TlsContext`; `MonitoringServer::enableTLS(cert, key)`; `/health` reports `tls_enabled` / `tls_ready` / `tls_available`; CMake `USE_TLS` (default ON) defines `COG0_HAVE_OPENSSL` when found
 - [x] **ToolWrapper stub completions** — replace placeholder implementations in `ToolWrapper.cpp` with functional code for REST API (POSIX sockets), Python script (popen), and shell command execution; added security validation and output size limits
 - [x] **MessageSerializer stub completions** — implement zero-dependency recursive descent JSON parser (`parseJsonObject`, `parseJsonString`, `parseJsonValue`); add proper JSON string escaping; implement RLE compression/decompression; add ISO 8601 timestamp parsing
 
@@ -268,11 +268,15 @@ Complete the remaining Phase 12 deferred items plus new production-readiness wor
 - `tests/test_phase14_migration.cpp` — 29 tests covering Agent serialize/deserialize roundtrip, migration protocol, state preservation, and error handling
 - `tests/test_phase14_websocket.cpp` — 39 tests covering WebSocket upgrade detection, frame encoding/decoding, SHA-1/Base64, and dashboard assets
 - `tests/test_phase14_raft_persistence.cpp` — 21 tests covering RaftLogStore operations, state persistence/recovery, and RaftNode integration
-- Total: **210+ tests, 0 failures** across 12 CTest targets
+- `tests/test_phase14_grpc.cpp` — AgentService dispatch + network client/server round-trips
+- `tests/test_phase14_tls.cpp` — TlsContext loading, MonitoringServer TLS flags, HTTPS health scrape
+- Total: **230+ tests, 0 failures** across 14 CTest targets
 
 ### Documentation
 - `docs/MIGRATION_GUIDE.md` — Agent migration procedures and API reference
 - `docs/DASHBOARD_GUIDE.md` — WebSocket monitoring dashboard usage and configuration
+- `docs/GRPC_GUIDE.md` — AgentService proto, JSON fallback transport, C++ client/server usage
+- `docs/PRODUCTION_DEPLOYMENT.md` — TLS, monitoring, clustering, and security checklist
 
 ---
 
@@ -280,7 +284,7 @@ Complete the remaining Phase 12 deferred items plus new production-readiness wor
 
 | Version | Highlights |
 |---------|-----------|
-| **0.5.0** | Phase 14: Agent migration (`serialize`/`deserialize`); WebSocket dashboard (`/dashboard`); pluggable `RaftLogStore` interface; `ToolWrapper` REST/Python/Shell execution; `MessageSerializer` JSON parser; 210+ tests (12 CTest targets) |
+| **0.5.0** | Phase 14: Agent migration (`serialize`/`deserialize`); WebSocket dashboard (`/dashboard`); pluggable `RaftLogStore`; AgentService gRPC/JSON API; MonitoringServer TLS; `ToolWrapper` REST/Python/Shell; `MessageSerializer` JSON parser; 230+ tests (14 CTest targets) |
 | **0.4.0** | Phase 12: `RaftConsensus` (Raft leader election, pure C++17); `ConflictResolver` (STRICT_PRIORITY / FAIRNESS_WEIGHTED / SLA_PRIORITY); `MonitoringServer` (HTTP /health /metrics /atoms /attention); `Logger` JSON-lines structured logging; 161 tests (7 CTest targets); CTest discoverable from root build dir |
 | **0.3.0** | Phase 13: `cog0` GitHub Copilot agent definition (`.github/agents/cog0.md`); CMake `BUILD_OPENCOG_MODULES` graceful fallback; CTest labels (unit/e2e/integration/benchmark); comprehensive CI pipeline |
 | **0.2.0** | Phases 4–7 (Planning, Learning, Communication, Memory) marked complete; Phase 11 (Profiling) implemented; `goals` and `infer` REPL commands; Phase 12 roadmap defined; 147 tests |

@@ -1,0 +1,105 @@
+// proto/agent.proto
+//
+// Copyright (C) 2024 OpenCog Foundation
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Phase 14 Feature 2.2 — Typed gRPC API for inter-module agent communication.
+// When real gRPC/protobuf tooling is unavailable the standalone build uses a
+// length-prefixed JSON transport that mirrors this service contract
+// (see GrpcAgentServer / GrpcAgentClient).
+
+syntax = "proto3";
+
+package cog0.agent.v1;
+
+option cc_enable_arenas = true;
+
+// -------------------------------------------------------------------------
+// Shared messages
+// -------------------------------------------------------------------------
+
+message Empty {}
+
+message GoalRequest {
+  string name = 1;
+  string description = 2;
+  double priority = 3;  // default treated as 1.0 by server when 0
+}
+
+message GoalResponse {
+  bool ok = 1;
+  string goal_id = 2;
+  string message = 3;
+}
+
+message PerceptRequest {
+  string source = 1;
+  string content = 2;
+  double salience = 3;  // default 0.5 when 0
+}
+
+message PerceptResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message RunRequest {
+  uint32 cycles = 1;  // number of cognitive cycles to run
+}
+
+message CycleStatus {
+  uint64 cycle = 1;
+  uint64 total = 2;
+  string phase = 3;
+  bool done = 4;
+  string detail = 5;
+}
+
+message AgentStatus {
+  string name = 1;
+  bool running = 2;
+  uint64 cycle_count = 3;
+  uint64 atom_count = 4;
+  uint64 pending_tasks = 5;
+  string report = 6;
+}
+
+message AtomQuery {
+  string name_prefix = 1;
+  string type = 2;   // optional AtomType name filter
+  uint32 limit = 3;  // 0 = unlimited
+}
+
+message AtomInfo {
+  string type = 1;
+  string name = 2;
+  double sti = 3;
+  double lti = 4;
+  double strength = 5;
+  double confidence = 6;
+}
+
+message AtomList {
+  repeated AtomInfo atoms = 1;
+}
+
+// -------------------------------------------------------------------------
+// Service
+// -------------------------------------------------------------------------
+
+service AgentService {
+  // Set a top-level goal on the bound agent.
+  rpc SetGoal(GoalRequest) returns (GoalResponse);
+
+  // Inject a perceptual input.
+  rpc InjectPercept(PerceptRequest) returns (PerceptResponse);
+
+  // Run N cognitive cycles, streaming progress.
+  rpc RunCycles(RunRequest) returns (stream CycleStatus);
+
+  // Snapshot agent status.
+  rpc GetStatus(Empty) returns (AgentStatus);
+
+  // Query atoms in the agent's AtomStore.
+  rpc QueryAtoms(AtomQuery) returns (AtomList);
+}
