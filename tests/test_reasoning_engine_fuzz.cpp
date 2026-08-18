@@ -268,3 +268,124 @@ TEST(fuzz_independent_engines_agree) {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Property: rules are kept sorted by descending priority after random inserts.
+
+TEST(fuzz_rules_sorted_by_priority) {
+    std::mt19937 rng(0x22222222);
+    std::uniform_int_distribution<int> countDist(2, 20);
+    std::uniform_real_distribution<double> prioDist(0.0, 100.0);
+
+    for (int trial = 0; trial < 80; ++trial) {
+        auto store = std::make_shared<AtomStore>();
+        ReasoningEngine re(store);
+        int n = countDist(rng);
+        for (int i = 0; i < n; ++i) {
+            re.addRule("prio_" + std::to_string(i),
+                       [](const AtomStore&) { return false; },
+                       [](AtomStore&) {},
+                       prioDist(rng));
+        }
+        const auto& rules = re.rules();
+        ASSERT_EQ(rules.size(), static_cast<size_t>(n));
+        for (size_t i = 1; i < rules.size(); ++i) {
+            ASSERT_GE(rules[i - 1]->priority, rules[i]->priority);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Property: queryEval is true iff EvaluationLink strength >= threshold.
+
+TEST(fuzz_query_eval_threshold) {
+    std::mt19937 rng(0x33333333);
+    std::uniform_real_distribution<double> sDist(0.0, 1.0);
+    std::uniform_real_distribution<double> thrDist(0.0, 1.0);
+
+    for (int trial = 0; trial < 100; ++trial) {
+        auto store = std::make_shared<AtomStore>();
+        ReasoningEngine re(store);
+
+        std::string pred = "P" + std::to_string(trial);
+        std::string arg  = "A" + std::to_string(trial);
+        auto predAtom = store->addNode(AtomType::PREDICATE, pred);
+        auto argAtom  = store->addNode(AtomType::CONCEPT, arg);
+        auto listLink = store->addLink(AtomType::LIST, {argAtom});
+        auto evalLink = store->addLink(AtomType::EVALUATION, {predAtom, listLink});
+
+        double strength = sDist(rng);
+        double thr      = thrDist(rng);
+        evalLink->setTV(TruthValue{strength, 1.0});
+
+        bool expected = strength >= thr;
+        ASSERT_EQ(re.queryEval(pred, arg, thr), expected);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Property: inheritance with strength < 0.5 is not matched by queryInherits.
+
+TEST(fuzz_query_inherits_strength_gate) {
+    std::mt19937 rng(0x44444444);
+    std::uniform_real_distribution<double> sDist(0.0, 1.0);
+
+    for (int trial = 0; trial < 80; ++trial) {
+        auto store = std::make_shared<AtomStore>();
+        ReasoningEngine re(store);
+        auto child  = store->addNode(AtomType::CONCEPT, "child_" + std::to_string(trial));
+        auto parent = store->addNode(AtomType::CONCEPT, "parent_" + std::to_string(trial));
+        auto lnk = store->addLink(AtomType::INHERITANCE, {child, parent});
+        double strength = sDist(rng);
+        lnk->setTV(TruthValue{strength, 1.0});
+
+        bool expected = strength >= 0.5;
+        ASSERT_EQ(re.queryInherits("child_" + std::to_string(trial),
+                                   "parent_" + std::to_string(trial)),
+                  expected);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Property: runCycle returns one result entry per registered rule.
+
+TEST(fuzz_run_cycle_result_count_matches_rules) {
+    std::mt19937 rng(0x55555555);
+    std::uniform_int_distribution<int> countDist(0, 15);
+    std::uniform_int_distribution<int> fireDist(0, 1);
+
+    for (int trial = 0; trial < 60; ++trial) {
+        auto store = std::make_shared<AtomStore>();
+        ReasoningEngine re(store);
+        int n = countDist(rng);
+        for (int i = 0; i < n; ++i) {
+            bool willFire = fireDist(rng) != 0;
+            re.addRule("rc_" + std::to_string(i),
+                       [willFire](const AtomStore&) { return willFire; },
+                       [](AtomStore&) {});
+        }
+        auto results = re.runCycle();
+        ASSERT_EQ(results.size(), re.rules().size());
+        ASSERT_EQ(results.size(), static_cast<size_t>(n));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Property: fireCount on each rule increments exactly once per firing cycle.
+
+TEST(fuzz_rule_fire_count_increments) {
+    std::mt19937 rng(0x66666666);
+    std::uniform_int_distribution<int> cyclesDist(1, 8);
+
+    for (int trial = 0; trial < 40; ++trial) {
+        auto store = std::make_shared<AtomStore>();
+        ReasoningEngine re(store);
+        re.addRule("counter",
+                   [](const AtomStore&) { return true; },
+                   [](AtomStore&) {});
+        int cycles = cyclesDist(rng);
+        for (int c = 0; c < cycles; ++c)
+            re.runCycle();
+        ASSERT_EQ(re.rules().front()->fireCount, static_cast<size_t>(cycles));
+    }
+}

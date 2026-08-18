@@ -229,7 +229,8 @@ protocols, agent migration across nodes, and a real-time monitoring dashboard.
 - `tests/test_phase14_migration.cpp` — 29 tests covering Agent serialize/deserialize roundtrip, migration protocol, state preservation, and error handling
 - `tests/test_action_executor_cog0.cpp` — 8 standalone ActionExecutor unit tests
 - `tests/test_action_scheduler_cog0.cpp` — 8 standalone ActionScheduler unit tests
-- Total: **190 tests, 0 failures** across 12 CTest targets (unit, e2e, integration×3, regression, benchmark×2, fuzz×2, phase14_migration, phase14_websocket)
+- Total: **190+ tests, 0 failures** across 13 CTest targets (unit, e2e, integration×3, regression, benchmark×2, fuzz×2, phase14_migration, phase14_websocket, cli smoke)
+- Near-term testing (issue #13): property-based fuzz suites for AtomStore/ReasoningEngine (`ctest -L fuzz`), benchmark suite via `ctest -R benchmark`, and multi-OS standalone CI (Linux + macOS + Windows)
 
 ---
 

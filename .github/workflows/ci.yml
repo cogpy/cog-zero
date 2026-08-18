@@ -7,8 +7,8 @@ on:
     branches: [main, develop]
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 jobs:
   build-and-test:
@@ -62,15 +62,27 @@ jobs:
             ninja-build \
             ${{ matrix.compiler == 'clang' && 'clang' || 'g++' }}
 
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja || true
+
       - name: Set up MSVC environment (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          choco install ninja -y --no-progress
+          ninja --version
 
       - name: Cache build directory
         uses: actions/cache@v4
         with:
           path: standalone/build
-          key: build-${{ matrix.os }}-${{ matrix.compiler }}-${{ hashFiles('standalone/**') }}
+          key: build-${{ matrix.os }}-${{ matrix.compiler }}-${{ hashFiles('standalone/**', 'src/**', 'include/**', 'tests/**', 'main.cpp') }}
           restore-keys: |
             build-${{ matrix.os }}-${{ matrix.compiler }}-
 
@@ -105,12 +117,29 @@ jobs:
                 --parallel $(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 2) \
                 --label-regex "^(e2e|integration)$"
 
-      - name: Benchmarks
+      - name: Property-based (fuzz) Tests
         shell: bash
         working-directory: standalone/build
         run: |
           ctest --output-on-failure \
-                --label-regex "^benchmark$"
+                --parallel $(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 2) \
+                --label-regex "^fuzz$"
+
+      - name: Benchmarks
+        shell: bash
+        working-directory: standalone/build
+        run: |
+          # Issue #13: benchmark suite must be reachable via `ctest -R benchmark`
+          ctest --output-on-failure \
+                -R benchmark
+
+      - name: Regression Tests
+        shell: bash
+        working-directory: standalone/build
+        run: |
+          ctest --output-on-failure \
+                --parallel $(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 2) \
+                --label-regex "^regression$"
 
   sanitizers:
     name: Sanitizers (ASan + UBSan)
@@ -147,4 +176,4 @@ jobs:
         run: |
           ctest --output-on-failure \
                 --parallel $(nproc) \
-                --label-regex "^(unit|e2e|integration)$"
+                --label-regex "^(unit|e2e|integration|fuzz|regression)$"

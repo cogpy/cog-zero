@@ -91,9 +91,19 @@ status
 ### Run Tests
 
 ```bash
+# Configure & build the standalone module with tests
+cmake -S standalone -B standalone/build -DBUILD_TESTING=ON
+cmake --build standalone/build --parallel
+
 # From the standalone/build directory
 ctest -V
-# → 147 tests passed (unit + e2e + integration + benchmarks + regression + perception)
+# → unit + e2e + integration + benchmarks + regression + fuzz + cli
+
+# Property-based (fuzz) tests for AtomStore and ReasoningEngine
+ctest -L fuzz --output-on-failure
+
+# Benchmark suite (latency budgets + microbenchmarks)
+ctest -R benchmark --output-on-failure
 ```
 
 ---
