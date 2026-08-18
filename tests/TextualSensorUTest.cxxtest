@@ -1,0 +1,286 @@
+/*
+ * tests/TextualSensorUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for TextualSensor
+ * Part of the AGENT-ZERO-GENESIS project - Phase 2 Perception
+ */
+
+#include <cxxtest/TestSuite.h>
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Handle.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/atom_types/types.h>
+
+#include "opencog/agentzero/TextualSensor.h"
+
+using namespace opencog;
+using namespace opencog::agentzero;
+
+class TextualSensorUTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr atomspace;
+    Handle agent_self;
+    std::unique_ptr<TextualSensor> sensor;
+
+public:
+    void setUp()
+    {
+        atomspace   = createAtomSpace();
+        agent_self  = atomspace->add_node(CONCEPT_NODE, "TestAgent");
+        sensor      = std::make_unique<TextualSensor>(atomspace, agent_self);
+    }
+
+    void tearDown()
+    {
+        sensor.reset();
+        atomspace.reset();
+    }
+
+    // -----------------------------------------------------------------------
+    // Constructor tests
+    // -----------------------------------------------------------------------
+
+    void testConstructorDefault()
+    {
+        TS_ASSERT(sensor != nullptr);
+        TS_ASSERT_EQUALS(sensor->getMode(), TextProcessingMode::SENTENCES);
+        TS_ASSERT_EQUALS(sensor->queue_size(), 0U);
+        TS_ASSERT_EQUALS(sensor->processedUnitCount(), 0U);
+    }
+
+    void testConstructorWordsMode()
+    {
+        TextualSensor ws(atomspace, agent_self, TextProcessingMode::WORDS);
+        TS_ASSERT_EQUALS(ws.getMode(), TextProcessingMode::WORDS);
+    }
+
+    void testNullAtomSpaceThrows()
+    {
+        TS_ASSERT_THROWS(
+            TextualSensor bad(nullptr, agent_self),
+            std::invalid_argument
+        );
+    }
+
+    void testUndefinedAgentSelfThrows()
+    {
+        TS_ASSERT_THROWS(
+            TextualSensor bad(atomspace, Handle::UNDEFINED),
+            std::invalid_argument
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Queue management tests
+    // -----------------------------------------------------------------------
+
+    void testAddTextIncreasesQueueSize()
+    {
+        TS_ASSERT_EQUALS(sensor->queue_size(), 0U);
+        sensor->add_text("Hello world.");
+        TS_ASSERT_EQUALS(sensor->queue_size(), 1U);
+        sensor->add_text("Another sentence.");
+        TS_ASSERT_EQUALS(sensor->queue_size(), 2U);
+    }
+
+    void testAddEmptyTextIgnored()
+    {
+        sensor->add_text("");
+        TS_ASSERT_EQUALS(sensor->queue_size(), 0U);
+    }
+
+    void testProcessNextDecreasesQueueSize()
+    {
+        sensor->add_text("First.");
+        sensor->add_text("Second.");
+        TS_ASSERT_EQUALS(sensor->queue_size(), 2U);
+
+        sensor->processNext();
+        TS_ASSERT_EQUALS(sensor->queue_size(), 1U);
+
+        sensor->processNext();
+        TS_ASSERT_EQUALS(sensor->queue_size(), 0U);
+    }
+
+    void testProcessNextEmptyQueueReturnsEmpty()
+    {
+        auto handles = sensor->processNext();
+        TS_ASSERT(handles.empty());
+    }
+
+    void testProcessAllDrainsQueue()
+    {
+        sensor->add_text("Alpha.");
+        sensor->add_text("Beta.");
+        sensor->add_text("Gamma.");
+
+        sensor->processAll();
+        TS_ASSERT_EQUALS(sensor->queue_size(), 0U);
+    }
+
+    // -----------------------------------------------------------------------
+    // Processing modes
+    // -----------------------------------------------------------------------
+
+    void testSentencesModeProducesMultipleHandles()
+    {
+        auto handles = sensor->processText("First sentence. Second sentence. Third!");
+        TS_ASSERT(handles.size() >= 2U);
+    }
+
+    void testWordsModeProducesWordAtoms()
+    {
+        sensor->setMode(TextProcessingMode::WORDS);
+        auto handles = sensor->processText("hello world foo");
+        TS_ASSERT_EQUALS(handles.size(), 3U);
+    }
+
+    void testDocumentsModeProducesOneHandle()
+    {
+        sensor->setMode(TextProcessingMode::DOCUMENTS);
+        auto handles = sensor->processText("Full document. Multiple sentences! No split.");
+        TS_ASSERT_EQUALS(handles.size(), 1U);
+    }
+
+    void testStreamModeProducesOneHandle()
+    {
+        sensor->setMode(TextProcessingMode::STREAM);
+        auto handles = sensor->processText("raw stream data");
+        TS_ASSERT_EQUALS(handles.size(), 1U);
+    }
+
+    void testSetModeChangesProcessing()
+    {
+        sensor->setMode(TextProcessingMode::DOCUMENTS);
+        TS_ASSERT_EQUALS(sensor->getMode(), TextProcessingMode::DOCUMENTS);
+        sensor->setMode(TextProcessingMode::WORDS);
+        TS_ASSERT_EQUALS(sensor->getMode(), TextProcessingMode::WORDS);
+    }
+
+    // -----------------------------------------------------------------------
+    // Atom creation tests
+    // -----------------------------------------------------------------------
+
+    void testProcessTextCreatesHandles()
+    {
+        auto handles = sensor->processText("The agent perceives the world.");
+        TS_ASSERT(!handles.empty());
+        for (const Handle& h : handles) {
+            TS_ASSERT(h != Handle::UNDEFINED);
+        }
+    }
+
+    void testProcessTextIncreasesProcessedCount()
+    {
+        TS_ASSERT_EQUALS(sensor->processedUnitCount(), 0U);
+        sensor->processText("One sentence.");
+        TS_ASSERT(sensor->processedUnitCount() > 0U);
+    }
+
+    void testProcessTextAtomInAtomSpace()
+    {
+        auto handles = sensor->processText("Knowledge is power.");
+        TS_ASSERT(!handles.empty());
+        for (const Handle& h : handles) {
+            TS_ASSERT(atomspace->is_valid_handle(h));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Salience scoring tests
+    // -----------------------------------------------------------------------
+
+    void testCalculateSalienceBasic()
+    {
+        TextSalienceScore score = sensor->calculateSalience("Hello world");
+        TS_ASSERT(score.lexical  >= 0.0 && score.lexical  <= 1.0);
+        TS_ASSERT(score.length   >= 0.0 && score.length   <= 1.0);
+        TS_ASSERT(score.novelty  >= 0.0 && score.novelty  <= 1.0);
+        TS_ASSERT(score.overall  >= 0.0 && score.overall  <= 1.0);
+    }
+
+    void testCalculateSalienceEmptyString()
+    {
+        TextSalienceScore score = sensor->calculateSalience("");
+        TS_ASSERT_DELTA(score.overall, 0.0, 1e-9);
+    }
+
+    void testCalculateSalienceNoveltyDecays()
+    {
+        TextSalienceScore first  = sensor->calculateSalience("unique_word_xyz");
+        TextSalienceScore second = sensor->calculateSalience("unique_word_xyz");
+        TS_ASSERT(first.novelty >= second.novelty);
+    }
+
+    void testCalculateSalienceLongerTextHigherLength()
+    {
+        TextSalienceScore short_s = sensor->calculateSalience("short");
+        TextSalienceScore long_s  = sensor->calculateSalience(
+            "a much longer text with many more words to test the length scoring component");
+        TS_ASSERT(long_s.length >= short_s.length);
+    }
+
+    // -----------------------------------------------------------------------
+    // SensoryInput conversion tests
+    // -----------------------------------------------------------------------
+
+    void testToSensoryInputType()
+    {
+        TextSalienceScore score(0.5, 0.5, 0.5, 0.5);
+        SensoryInput si = sensor->toSensoryInput("hello", score);
+        TS_ASSERT_EQUALS(si.sensor_type, "textual");
+        TS_ASSERT_EQUALS(si.modality, "text_stream");
+        TS_ASSERT(!si.data.empty());
+        TS_ASSERT_DELTA(si.confidence, 0.5, 1e-9);
+    }
+
+    void testToSensoryInputDataEncoding()
+    {
+        TextSalienceScore score(0.8, 0.6, 0.7, 0.7);
+        SensoryInput si = sensor->toSensoryInput("hi", score);
+        TS_ASSERT_EQUALS(si.data.size(), 2U);
+        for (double d : si.data) {
+            TS_ASSERT(d >= 0.0 && d <= 1.0);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Statistics tests
+    // -----------------------------------------------------------------------
+
+    void testGetStatsFormat()
+    {
+        std::string stats = sensor->getStats();
+        TS_ASSERT(stats.find("processed_units") != std::string::npos);
+        TS_ASSERT(stats.find("queued_count")    != std::string::npos);
+        TS_ASSERT(stats.find("vocabulary_size") != std::string::npos);
+    }
+
+    void testResetVocabularyClearsNovelty()
+    {
+        sensor->processText("some repeated words repeated again");
+        TextSalienceScore before = sensor->calculateSalience("repeated");
+        sensor->resetVocabulary();
+        TextSalienceScore after = sensor->calculateSalience("repeated");
+        TS_ASSERT(after.novelty >= before.novelty);
+    }
+
+    // -----------------------------------------------------------------------
+    // Thread-safety smoke test
+    // -----------------------------------------------------------------------
+
+    void testConcurrentAddAndProcess()
+    {
+        for (int i = 0; i < 10; ++i) {
+            sensor->add_text("Sentence number " + std::to_string(i) + ".");
+        }
+        auto handles = sensor->processAll();
+        TS_ASSERT(!handles.empty());
+        TS_ASSERT_EQUALS(sensor->queue_size(), 0U);
+    }
+};

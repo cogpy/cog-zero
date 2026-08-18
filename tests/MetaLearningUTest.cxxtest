@@ -1,0 +1,283 @@
+/*
+ * tests/MetaLearningUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for MetaLearning class
+ */
+
+#include <cxxtest/TestSuite.h>
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/atom_types/atom_types.h>
+
+#include "opencog/agentzero/MetaLearning.h"
+#include "opencog/agentzero/ExperienceManager.h"
+
+using namespace opencog;
+using namespace opencog::agentzero;
+
+class MetaLearningUTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr atomspace;
+    std::unique_ptr<MetaLearning> meta_learning;
+    Handle test_context;
+    Handle test_task;
+
+public:
+    void setUp()
+    {
+        atomspace = std::make_shared<AtomSpace>();
+        
+        MetaLearningConfig config;
+        config.meta_learning_rate = 0.1;
+        config.exploration_factor = 0.2;
+        config.max_experience_history = 100;
+        
+        meta_learning = std::make_unique<MetaLearning>(atomspace, config);
+        meta_learning->initialize();
+        
+        // Create test atoms
+        test_context = atomspace->add_node(CONCEPT_NODE, "TestContext");
+        test_task = atomspace->add_node(CONCEPT_NODE, "TestTask");
+    }
+
+    void tearDown()
+    {
+        meta_learning.reset();
+        atomspace.reset();
+    }
+
+    // Test initialization
+    void testInitialization()
+    {
+        TS_ASSERT(meta_learning->isInitialized());
+        TS_ASSERT_EQUALS(meta_learning->getCurrentStrategy(), LearningStrategy::META_ADAPTIVE);
+        
+        auto metrics = meta_learning->getCurrentMetrics();
+        TS_ASSERT_EQUALS(metrics.learning_rate, 0.0);
+        TS_ASSERT_EQUALS(metrics.accuracy, 0.0);
+    }
+
+    // Test learning strategy management
+    void testLearningStrategyManagement()
+    {
+        // Test setting strategy
+        meta_learning->setLearningStrategy(LearningStrategy::SUPERVISED);
+        TS_ASSERT_EQUALS(meta_learning->getCurrentStrategy(), LearningStrategy::SUPERVISED);
+        
+        // Test strategy adaptation
+        LearningStrategy adapted = meta_learning->adaptLearningStrategy(test_context);
+        TS_ASSERT(adapted != static_cast<LearningStrategy>(-1));
+        
+        // Test strategy string conversion
+        std::string strategy_str = MetaLearning::strategyToString(LearningStrategy::REINFORCEMENT);
+        TS_ASSERT_EQUALS(strategy_str, "REINFORCEMENT");
+        
+        LearningStrategy parsed = MetaLearning::stringToStrategy("EXPLORATION");
+        TS_ASSERT_EQUALS(parsed, LearningStrategy::EXPLORATION);
+    }
+
+    // Test task learning
+    void testTaskLearning()
+    {
+        // Test learning without feedback
+        Handle outcome1 = meta_learning->learnTask(test_task, test_context);
+        TS_ASSERT(outcome1 != Handle::UNDEFINED);
+        
+        // Test learning with feedback
+        Handle feedback = atomspace->add_node(CONCEPT_NODE, "PositiveFeedback");
+        Handle outcome2 = meta_learning->learnTask(test_task, test_context, feedback);
+        TS_ASSERT(outcome2 != Handle::UNDEFINED);
+        
+        // Test learning with undefined task
+        Handle outcome3 = meta_learning->learnTask(Handle::UNDEFINED, test_context);
+        TS_ASSERT_EQUALS(outcome3, Handle::UNDEFINED);
+    }
+
+    // Test experience recording
+    void testExperienceRecording()
+    {
+        // Record learning experiences
+        meta_learning->recordLearningExperience(test_context, test_task, 
+                                               LearningStrategy::SUPERVISED, true,
+                                               std::chrono::milliseconds(100));
+        
+        meta_learning->recordLearningExperience(test_context, test_task, 
+                                               LearningStrategy::REINFORCEMENT, false,
+                                               std::chrono::milliseconds(200));
+        
+        // Check metrics are updated
+        auto metrics = meta_learning->getCurrentMetrics();
+        TS_ASSERT_DIFFERS(metrics.processing_time.count(), 0);
+    }
+
+    // Test transfer learning
+    void testTransferLearning()
+    {
+        Handle source_domain = atomspace->add_node(CONCEPT_NODE, "SourceDomain");
+        Handle target_domain = atomspace->add_node(CONCEPT_NODE, "TargetDomain");
+        
+        // Test knowledge transfer
+        double transfer_score = meta_learning->transferKnowledgeBetweenDomains(source_domain, target_domain);
+        TS_ASSERT(transfer_score >= 0.0 && transfer_score <= 1.0);
+        
+        // Test transfer with undefined domains
+        double invalid_transfer = meta_learning->transferKnowledgeBetweenDomains(Handle::UNDEFINED, target_domain);
+        TS_ASSERT_EQUALS(invalid_transfer, 0.0);
+    }
+
+    // Test curriculum learning
+    void testCurriculumLearning()
+    {
+        Handle next_task = meta_learning->updateCurriculum();
+        // May return undefined if no curriculum is available
+        TS_ASSERT(next_task == Handle::UNDEFINED || atomspace->is_valid_handle(next_task));
+    }
+
+    // Test performance analysis
+    void testPerformanceAnalysis()
+    {
+        // Record some experiences first
+        for (int i = 0; i < 5; i++) {
+            meta_learning->recordLearningExperience(test_context, test_task, 
+                                                   LearningStrategy::SUPERVISED, i > 2,
+                                                   std::chrono::milliseconds(100 + i * 10));
+        }
+        
+        // Test effectiveness analysis
+        Handle analysis = meta_learning->analyzeLearningEffectiveness(std::chrono::hours(1));
+        TS_ASSERT(analysis != Handle::UNDEFINED);
+        
+        // Test trend analysis
+        Handle trend = meta_learning->getLearningTrend(std::chrono::hours(1));
+        TS_ASSERT(trend != Handle::UNDEFINED);
+    }
+
+    // Test meta-learning reflection
+    void testMetaLearningReflection()
+    {
+        // Record some experiences
+        for (int i = 0; i < 10; i++) {
+            meta_learning->recordLearningExperience(test_context, test_task, 
+                                                   LearningStrategy::SUPERVISED, i % 2 == 0,
+                                                   std::chrono::milliseconds(100));
+        }
+        
+        // Test reflection
+        Handle insights = meta_learning->triggerReflection();
+        TS_ASSERT(insights != Handle::UNDEFINED);
+        
+        // Test pattern learning
+        int patterns = meta_learning->learnMetaPatterns(10);
+        TS_ASSERT(patterns >= 0);
+        
+        // Test applying insights
+        int optimizations = meta_learning->applyMetaInsights(test_context);
+        TS_ASSERT(optimizations >= 0);
+    }
+
+    // Test strategy performance metrics
+    void testStrategyMetrics()
+    {
+        // Record experiences for different strategies
+        meta_learning->recordLearningExperience(test_context, test_task, 
+                                               LearningStrategy::SUPERVISED, true,
+                                               std::chrono::milliseconds(100));
+        
+        meta_learning->recordLearningExperience(test_context, test_task, 
+                                               LearningStrategy::REINFORCEMENT, false,
+                                               std::chrono::milliseconds(150));
+        
+        // Get strategy metrics
+        auto supervised_metrics = meta_learning->getStrategyMetrics(LearningStrategy::SUPERVISED);
+        auto reinforcement_metrics = meta_learning->getStrategyMetrics(LearningStrategy::REINFORCEMENT);
+        
+        TS_ASSERT(supervised_metrics.accuracy >= 0.0);
+        TS_ASSERT(reinforcement_metrics.accuracy >= 0.0);
+    }
+
+    // Test configuration
+    void testConfiguration()
+    {
+        MetaLearningConfig new_config;
+        new_config.meta_learning_rate = 0.2;
+        new_config.exploration_factor = 0.3;
+        new_config.enable_transfer_learning = false;
+        
+        meta_learning->configure(new_config);
+        
+        // Configuration changes should be applied internally
+        // (no direct way to verify without exposing internal state)
+    }
+
+    // Test component integration
+    void testComponentIntegration()
+    {
+        auto experience_manager = std::make_shared<ExperienceManager>(atomspace);
+        experience_manager->initialize();
+        
+        meta_learning->setExperienceManager(experience_manager);
+        
+        // Test that integration doesn't break functionality
+        Handle outcome = meta_learning->learnTask(test_task, test_context);
+        TS_ASSERT(outcome != Handle::UNDEFINED);
+    }
+
+    // Test reset functionality
+    void testReset()
+    {
+        // Record some experiences
+        meta_learning->recordLearningExperience(test_context, test_task, 
+                                               LearningStrategy::SUPERVISED, true,
+                                               std::chrono::milliseconds(100));
+        
+        // Reset system
+        meta_learning->reset();
+        
+        // Check that metrics are reset
+        auto metrics = meta_learning->getCurrentMetrics();
+        TS_ASSERT_EQUALS(metrics.accuracy, 0.0);
+        TS_ASSERT_EQUALS(metrics.learning_rate, 0.0);
+    }
+
+    // Test error handling
+    void testErrorHandling()
+    {
+        // Test with invalid inputs
+        Handle invalid_outcome = meta_learning->learnTask(Handle::UNDEFINED, Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(invalid_outcome, Handle::UNDEFINED);
+        
+        // Test analysis with no experiences
+        Handle empty_analysis = meta_learning->analyzeLearningEffectiveness(std::chrono::hours(1));
+        TS_ASSERT_EQUALS(empty_analysis, Handle::UNDEFINED);
+        
+        // Test pattern learning with insufficient data
+        int no_patterns = meta_learning->learnMetaPatterns(0);
+        TS_ASSERT_EQUALS(no_patterns, 0);
+    }
+
+    // Test performance with many experiences
+    void testPerformanceWithManyExperiences()
+    {
+        // Record many experiences
+        for (int i = 0; i < 50; i++) {
+            LearningStrategy strategy = static_cast<LearningStrategy>(i % 7);
+            bool success = i % 3 == 0;
+            
+            meta_learning->recordLearningExperience(test_context, test_task, 
+                                                   strategy, success,
+                                                   std::chrono::milliseconds(100 + i));
+        }
+        
+        // System should still function properly
+        Handle analysis = meta_learning->analyzeLearningEffectiveness(std::chrono::hours(1));
+        TS_ASSERT(analysis != Handle::UNDEFINED);
+        
+        int patterns = meta_learning->learnMetaPatterns(50);
+        TS_ASSERT(patterns >= 0);
+    }
+};

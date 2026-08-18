@@ -1,0 +1,278 @@
+/*
+ * tests/AgentZeroCoreUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for Agent-Zero Core implementation
+ * Tests OpenCog integration and basic functionality
+ * Part of the AGENT-ZERO-GENESIS project
+ */
+
+#include <memory>
+#include <string>
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/cogserver/server/CogServer.h>
+#include <opencog/util/Logger.h>
+
+#include <opencog/agentzero/AgentZeroCore.h>
+#include <opencog/agentzero/CognitiveLoop.h>
+#include <opencog/agentzero/TaskManager.h>
+#include <opencog/agentzero/KnowledgeIntegrator.h>
+
+#include <cxxtest/TestSuite.h>
+
+using namespace opencog;
+using namespace opencog::agentzero;
+
+class AgentZeroCoreUTest : public CxxTest::TestSuite
+{
+private:
+    std::unique_ptr<CogServer> cogserver;
+    std::unique_ptr<AgentZeroCore> agent_core;
+
+public:
+    AgentZeroCoreUTest()
+    {
+        logger().set_level(Logger::INFO);
+        logger().set_timestamp_flag(false);
+        logger().set_print_level_flag(false);
+    }
+
+    void setUp()
+    {
+        // Create CogServer instance for testing
+        cogserver = std::make_unique<CogServer>();
+        
+        // Initialize AtomSpace in CogServer
+        cogserver->loadModules();
+        
+        // Create AgentZeroCore instance
+        agent_core = std::make_unique<AgentZeroCore>(*cogserver, "TestAgent");
+    }
+
+    void tearDown()
+    {
+        if (agent_core) {
+            agent_core->stop();
+            agent_core.reset();
+        }
+        cogserver.reset();
+    }
+
+    void test_AgentZeroCoreConstruction()
+    {
+        TS_ASSERT(agent_core != nullptr);
+        TS_ASSERT_EQUALS(agent_core->getAgentName(), "TestAgent");
+        TS_ASSERT_EQUALS(agent_core->isRunning(), false);
+        TS_ASSERT_EQUALS(agent_core->isInitialized(), false);
+    }
+
+    void test_AgentZeroCoreInitialization()
+    {
+        // Test module initialization
+        agent_core->init();
+        
+        TS_ASSERT_EQUALS(agent_core->isInitialized(), true);
+        TS_ASSERT(agent_core->getAtomSpace() != nullptr);
+        TS_ASSERT(agent_core->getAgentSelfAtom() != Handle::UNDEFINED);
+        
+        // Test component initialization
+        TS_ASSERT(agent_core->getCognitiveLoop() != nullptr);
+        TS_ASSERT(agent_core->getTaskManager() != nullptr);
+        TS_ASSERT(agent_core->getKnowledgeIntegrator() != nullptr);
+    }
+
+    void test_AgentZeroCoreConfiguration()
+    {
+        // Test configuration parsing
+        bool config_result = agent_core->config("cognitive_loop=false;goal_processing=true");
+        TS_ASSERT_EQUALS(config_result, true);
+        
+        // Test empty/null configuration
+        TS_ASSERT_EQUALS(agent_core->config(""), true);
+        TS_ASSERT_EQUALS(agent_core->config(nullptr), false);
+    }
+
+    void test_AgentZeroCoreModuleInterface()
+    {
+        // Test Module interface implementation
+        TS_ASSERT_EQUALS(std::string(agent_core->id()), "AgentZeroCore");
+        
+        // Test initialization through Module interface
+        agent_core->init();
+        TS_ASSERT_EQUALS(agent_core->isInitialized(), true);
+    }
+
+    void test_AgentZeroCoreStartStop()
+    {
+        // Initialize first
+        agent_core->init();
+        
+        // Test start
+        bool start_result = agent_core->start();
+        TS_ASSERT_EQUALS(start_result, true);
+        TS_ASSERT_EQUALS(agent_core->isRunning(), true);
+        
+        // Test stop
+        bool stop_result = agent_core->stop();
+        TS_ASSERT_EQUALS(stop_result, true);
+        TS_ASSERT_EQUALS(agent_core->isRunning(), false);
+        
+        // Test start without initialization
+        AgentZeroCore uninitialized_agent(*cogserver, "UninitializedAgent");
+        TS_ASSERT_EQUALS(uninitialized_agent.start(), false);
+    }
+
+    void test_AgentZeroCoreAtomSpaceIntegration()
+    {
+        agent_core->init();
+        
+        AtomSpacePtr atomspace = agent_core->getAtomSpace();
+        TS_ASSERT(atomspace != nullptr);
+        
+        // Test agent self-representation
+        Handle agent_self = agent_core->getAgentSelfAtom();
+        TS_ASSERT(agent_self != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(agent_self->get_name(), "TestAgent");
+        TS_ASSERT(agent_self->get_type() == CONCEPT_NODE);
+        
+        // Test atom is in AtomSpace
+        TS_ASSERT(atomspace->is_valid_handle(agent_self));
+    }
+
+    void test_AgentZeroCoreGoalManagement()
+    {
+        agent_core->init();
+        
+        // Test goal setting
+        Handle goal_atom = agent_core->getAtomSpace()->add_node(CONCEPT_NODE, "TestGoal");
+        bool goal_set = agent_core->setGoal(goal_atom);
+        TS_ASSERT_EQUALS(goal_set, true);
+        TS_ASSERT_EQUALS(agent_core->getCurrentGoal(), goal_atom);
+        
+        // Test invalid goal
+        TS_ASSERT_EQUALS(agent_core->setGoal(Handle::UNDEFINED), false);
+    }
+
+    void test_AgentZeroCoreStatusInfo()
+    {
+        agent_core->init();
+        
+        std::string status = agent_core->getStatusInfo();
+        TS_ASSERT(status.find("TestAgent") != std::string::npos);
+        TS_ASSERT(status.find("initialized") != std::string::npos);
+        TS_ASSERT(status.find("running") != std::string::npos);
+    }
+
+    void test_CognitiveLoopBasicFunctionality()
+    {
+        agent_core->init();
+        
+        CognitiveLoop* loop = agent_core->getCognitiveLoop();
+        TS_ASSERT(loop != nullptr);
+        
+        // Test initial state
+        TS_ASSERT_EQUALS(loop->isRunning(), false);
+        TS_ASSERT_EQUALS(loop->isPaused(), false);
+        TS_ASSERT_EQUALS(loop->getCycleCount(), 0);
+        
+        // Test single cycle execution
+        bool cycle_result = loop->executeSingleCycle();
+        TS_ASSERT_EQUALS(cycle_result, true);
+        TS_ASSERT_EQUALS(loop->getCycleCount(), 1);
+        
+        // Test phase configuration
+        loop->configurePhases(true, false, true, false);
+        TS_ASSERT_EQUALS(loop->executeSingleCycle(), true);
+    }
+
+    void test_TaskManagerBasicFunctionality()
+    {
+        agent_core->init();
+        
+        TaskManager* task_mgr = agent_core->getTaskManager();
+        TS_ASSERT(task_mgr != nullptr);
+        
+        // Test goal creation
+        Handle goal = task_mgr->setGoal("TestGoal", true);
+        TS_ASSERT(goal != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(task_mgr->getCurrentGoal(), goal);
+        
+        // Test task creation
+        Handle task = task_mgr->createTask("TestTask", TaskManager::Priority::HIGH);
+        TS_ASSERT(task != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(task_mgr->getTaskStatus(task), TaskManager::TaskStatus::PENDING);
+        
+        // Test task completion
+        bool completed = task_mgr->completeTask(task, true);
+        TS_ASSERT_EQUALS(completed, true);
+        TS_ASSERT_EQUALS(task_mgr->getTaskStatus(task), TaskManager::TaskStatus::COMPLETED);
+    }
+
+    void test_KnowledgeIntegratorBasicFunctionality()
+    {
+        agent_core->init();
+        
+        KnowledgeIntegrator* knowledge = agent_core->getKnowledgeIntegrator();
+        TS_ASSERT(knowledge != nullptr);
+        
+        // Test fact addition
+        Handle fact = knowledge->addFact("The sky is blue", KnowledgeIntegrator::ConfidenceLevel::HIGH);
+        TS_ASSERT(fact != Handle::UNDEFINED);
+        
+        // Test concept registration
+        Handle concept = knowledge->registerConcept("Sky", "The atmosphere above");
+        TS_ASSERT(concept != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(knowledge->hasKnowledgeAbout("Sky"), true);
+        TS_ASSERT_EQUALS(knowledge->hasKnowledgeAbout("NonExistentConcept"), false);
+        
+        // Test knowledge query
+        std::vector<Handle> results = knowledge->queryKnowledge("sky", 10);
+        TS_ASSERT(results.size() > 0);
+        
+        // Test semantic relation
+        Handle relation = knowledge->addSemanticRelation("Sky", "has", "Blue", 
+                                                         KnowledgeIntegrator::ConfidenceLevel::MEDIUM);
+        TS_ASSERT(relation != Handle::UNDEFINED);
+    }
+
+    void test_CognitiveStepProcessing()
+    {
+        agent_core->init();
+        
+        // Test cognitive step processing
+        bool step_result = agent_core->processCognitiveStep();
+        TS_ASSERT_EQUALS(step_result, true);
+        
+        // Test processing without initialization
+        AgentZeroCore uninitialized_agent(*cogserver, "UninitializedAgent");
+        TS_ASSERT_EQUALS(uninitialized_agent.processCognitiveStep(), false);
+    }
+
+    void test_ComponentIntegration()
+    {
+        agent_core->init();
+        
+        // Test that all components share the same AtomSpace
+        AtomSpacePtr main_atomspace = agent_core->getAtomSpace();
+        
+        // Add knowledge and verify it's accessible through queries
+        KnowledgeIntegrator* knowledge = agent_core->getKnowledgeIntegrator();
+        Handle fact = knowledge->addFact("Integration test fact", 
+                                         KnowledgeIntegrator::ConfidenceLevel::HIGH);
+        
+        TS_ASSERT(main_atomspace->is_valid_handle(fact));
+        
+        // Create a task and verify it's in the AtomSpace
+        TaskManager* task_mgr = agent_core->getTaskManager();
+        Handle task = task_mgr->createTask("Integration test task", TaskManager::Priority::MEDIUM);
+        
+        TS_ASSERT(main_atomspace->is_valid_handle(task));
+        
+        // Verify cognitive loop can access created atoms
+        CognitiveLoop* loop = agent_core->getCognitiveLoop();
+        TS_ASSERT(loop->executeSingleCycle());
+    }
+};

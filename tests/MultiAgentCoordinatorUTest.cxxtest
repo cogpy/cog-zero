@@ -1,0 +1,653 @@
+/*
+ * opencog/agentzero/communication/MultiAgentCoordinatorUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for Multi-Agent Coordination Protocols
+ * Part of the AGENT-ZERO-GENESIS project - AZ-MULTI-001
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <thread>
+#include <chrono>
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/util/Logger.h>
+
+#include "opencog/agentzero/communication/MultiAgentCoordinator.h"
+#include "opencog/agentzero/communication/AgentComms.h"
+
+using namespace opencog;
+using namespace opencog::agentzero::communication;
+
+class MultiAgentCoordinatorUTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr _atomspace;
+    std::shared_ptr<AgentComms> _comms;
+    std::unique_ptr<MultiAgentCoordinator> _coordinator;
+    AgentId _coordinator_id;
+
+public:
+    MultiAgentCoordinatorUTest() {
+        logger().set_level(Logger::INFO);
+        logger().set_print_to_stdout_flag(true);
+    }
+
+    void setUp() {
+        _atomspace = createAtomSpace();
+        _coordinator_id = AgentId("TestCoordinator", "instance1");
+        
+        // Create communication system
+        CommConfig config;
+        config.enable_persistence = true;
+        _comms = std::make_shared<AgentComms>(_coordinator_id, config);
+        
+        // Create coordinator
+        _coordinator = std::make_unique<MultiAgentCoordinator>(
+            _atomspace, _comms, _coordinator_id);
+    }
+
+    void tearDown() {
+        _coordinator.reset();
+        _comms.reset();
+        _atomspace.reset();
+    }
+
+    // ==============================================================
+    // Initialization Tests
+    // ==============================================================
+
+    void test_initialization() {
+        TS_ASSERT(_coordinator != nullptr);
+        TS_ASSERT(_atomspace != nullptr);
+        
+        bool success = _coordinator->initialize();
+        TS_ASSERT(success);
+        
+        // Verify AtomSpace has coordination context
+        Handle coord_context = _atomspace->get_node(CONCEPT_NODE, "CoordinationContext");
+        TS_ASSERT(coord_context != Handle::UNDEFINED);
+    }
+
+    void test_double_initialization() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        // Second initialization should return false
+        TS_ASSERT(!_coordinator->initialize());
+    }
+
+    // ==============================================================
+    // Agent Registration Tests
+    // ==============================================================
+
+    void test_agent_registration() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        AgentId agent1("TestAgent1", "inst1");
+        std::vector<AgentCapability> caps = {
+            AgentCapability("planning", 0.9),
+            AgentCapability("reasoning", 0.8)
+        };
+        
+        bool success = _coordinator->registerAgent(agent1, caps);
+        TS_ASSERT(success);
+        
+        // Verify agent is registered
+        auto agents = _coordinator->getRegisteredAgents();
+        TS_ASSERT_EQUALS(agents.size(), 1);
+        TS_ASSERT(agents[0] == agent1);
+        
+        // Verify agent info
+        auto info = _coordinator->getAgentInfo(agent1);
+        TS_ASSERT(info != nullptr);
+        TS_ASSERT_EQUALS(info->agent_id.name, "TestAgent1");
+        TS_ASSERT_EQUALS(info->capabilities.size(), 2);
+        TS_ASSERT_EQUALS(info->status, "active");
+    }
+
+    void test_multiple_agent_registration() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        AgentId agent1("Agent1");
+        AgentId agent2("Agent2");
+        AgentId agent3("Agent3");
+        
+        std::vector<AgentCapability> caps;
+        caps.push_back(AgentCapability("skill1"));
+        
+        TS_ASSERT(_coordinator->registerAgent(agent1, caps));
+        TS_ASSERT(_coordinator->registerAgent(agent2, caps));
+        TS_ASSERT(_coordinator->registerAgent(agent3, caps));
+        
+        auto agents = _coordinator->getRegisteredAgents();
+        TS_ASSERT_EQUALS(agents.size(), 3);
+        
+        auto stats = _coordinator->getStatistics();
+        TS_ASSERT_EQUALS(stats.total_agents, 3);
+        TS_ASSERT_EQUALS(stats.active_agents, 3);
+    }
+
+    void test_agent_unregistration() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        AgentId agent1("Agent1");
+        std::vector<AgentCapability> caps;
+        
+        TS_ASSERT(_coordinator->registerAgent(agent1, caps));
+        TS_ASSERT_EQUALS(_coordinator->getRegisteredAgents().size(), 1);
+        
+        TS_ASSERT(_coordinator->unregisterAgent(agent1));
+        TS_ASSERT_EQUALS(_coordinator->getRegisteredAgents().size(), 0);
+    }
+
+    void test_agent_status_update() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        AgentId agent1("Agent1");
+        std::vector<AgentCapability> caps;
+        
+        TS_ASSERT(_coordinator->registerAgent(agent1, caps));
+        
+        // Update status
+        TS_ASSERT(_coordinator->updateAgentStatus(agent1, "busy", 0.7));
+        
+        auto info = _coordinator->getAgentInfo(agent1);
+        TS_ASSERT(info != nullptr);
+        TS_ASSERT_EQUALS(info->status, "busy");
+        TS_ASSERT_DELTA(info->load_factor, 0.7, 0.01);
+    }
+
+    void test_agent_heartbeat() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        AgentId agent1("Agent1");
+        std::vector<AgentCapability> caps;
+        
+        TS_ASSERT(_coordinator->registerAgent(agent1, caps));
+        
+        auto info1 = _coordinator->getAgentInfo(agent1);
+        auto time1 = info1->last_heartbeat;
+        
+        // Small delay
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        
+        TS_ASSERT(_coordinator->recordHeartbeat(agent1));
+        
+        auto info2 = _coordinator->getAgentInfo(agent1);
+        auto time2 = info2->last_heartbeat;
+        
+        TS_ASSERT(time2 > time1);
+    }
+
+    void test_find_agents_by_capability() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        AgentId agent1("Agent1");
+        AgentId agent2("Agent2");
+        AgentId agent3("Agent3");
+        
+        std::vector<AgentCapability> caps1 = {
+            AgentCapability("planning"),
+            AgentCapability("reasoning")
+        };
+        std::vector<AgentCapability> caps2 = {
+            AgentCapability("planning")
+        };
+        std::vector<AgentCapability> caps3 = {
+            AgentCapability("reasoning")
+        };
+        
+        _coordinator->registerAgent(agent1, caps1);
+        _coordinator->registerAgent(agent2, caps2);
+        _coordinator->registerAgent(agent3, caps3);
+        
+        auto planning_agents = _coordinator->findAgentsByCapability("planning");
+        TS_ASSERT_EQUALS(planning_agents.size(), 2);
+        
+        auto reasoning_agents = _coordinator->findAgentsByCapability("reasoning");
+        TS_ASSERT_EQUALS(reasoning_agents.size(), 2);
+    }
+
+    // ==============================================================
+    // Task Delegation Tests
+    // ==============================================================
+
+    void test_task_creation() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        std::string task_id = _coordinator->createTask(
+            "Test task",
+            {"planning", "reasoning"},
+            MessagePriority::HIGH
+        );
+        
+        TS_ASSERT(!task_id.empty());
+        
+        auto task = _coordinator->getTaskInfo(task_id);
+        TS_ASSERT(task != nullptr);
+        TS_ASSERT_EQUALS(task->description, "Test task");
+        TS_ASSERT_EQUALS(task->required_capabilities.size(), 2);
+        TS_ASSERT_EQUALS(task->status, "pending");
+        
+        auto stats = _coordinator->getStatistics();
+        TS_ASSERT_EQUALS(stats.total_tasks, 1);
+    }
+
+    void test_task_assignment() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        // Register agent
+        AgentId agent1("Agent1");
+        std::vector<AgentCapability> caps = {
+            AgentCapability("planning")
+        };
+        _coordinator->registerAgent(agent1, caps);
+        
+        // Create task
+        std::string task_id = _coordinator->createTask(
+            "Test task",
+            {"planning"}
+        );
+        
+        // Assign task
+        TS_ASSERT(_coordinator->assignTask(task_id, agent1));
+        
+        auto task = _coordinator->getTaskInfo(task_id);
+        TS_ASSERT(task != nullptr);
+        TS_ASSERT_EQUALS(task->status, "assigned");
+        TS_ASSERT(task->assigned_to == agent1);
+    }
+
+    void test_task_auto_assignment() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        // Register agent with capability
+        AgentId agent1("Agent1");
+        std::vector<AgentCapability> caps = {
+            AgentCapability("planning", 0.9)
+        };
+        _coordinator->registerAgent(agent1, caps);
+        
+        // Create task
+        std::string task_id = _coordinator->createTask(
+            "Test task",
+            {"planning"}
+        );
+        
+        // Auto-assign (no agent specified)
+        TS_ASSERT(_coordinator->assignTask(task_id));
+        
+        auto task = _coordinator->getTaskInfo(task_id);
+        TS_ASSERT(task != nullptr);
+        TS_ASSERT_EQUALS(task->status, "assigned");
+        TS_ASSERT(task->assigned_to == agent1);
+    }
+
+    void test_task_status_update() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        std::string task_id = _coordinator->createTask("Test task", {});
+        
+        TS_ASSERT(_coordinator->updateTaskStatus(task_id, "in_progress"));
+        
+        auto task = _coordinator->getTaskInfo(task_id);
+        TS_ASSERT(task != nullptr);
+        TS_ASSERT_EQUALS(task->status, "in_progress");
+    }
+
+    void test_task_completion() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        std::string task_id = _coordinator->createTask("Test task", {});
+        
+        TS_ASSERT(_coordinator->completeTask(task_id));
+        
+        auto task = _coordinator->getTaskInfo(task_id);
+        TS_ASSERT(task != nullptr);
+        TS_ASSERT_EQUALS(task->status, "completed");
+        
+        auto stats = _coordinator->getStatistics();
+        TS_ASSERT_EQUALS(stats.completed_tasks, 1);
+    }
+
+    void test_get_tasks_by_status() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        _coordinator->createTask("Task 1", {});
+        _coordinator->createTask("Task 2", {});
+        std::string task3 = _coordinator->createTask("Task 3", {});
+        
+        _coordinator->updateTaskStatus(task3, "in_progress");
+        
+        auto pending = _coordinator->getTasksByStatus("pending");
+        TS_ASSERT_EQUALS(pending.size(), 2);
+        
+        auto in_progress = _coordinator->getTasksByStatus("in_progress");
+        TS_ASSERT_EQUALS(in_progress.size(), 1);
+    }
+
+    void test_get_agent_tasks() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        AgentId agent1("Agent1");
+        std::vector<AgentCapability> caps;
+        _coordinator->registerAgent(agent1, caps);
+        
+        std::string task1 = _coordinator->createTask("Task 1", {});
+        std::string task2 = _coordinator->createTask("Task 2", {});
+        
+        _coordinator->assignTask(task1, agent1);
+        _coordinator->assignTask(task2, agent1);
+        
+        auto agent_tasks = _coordinator->getAgentTasks(agent1);
+        TS_ASSERT_EQUALS(agent_tasks.size(), 2);
+    }
+
+    // ==============================================================
+    // Consensus Mechanism Tests
+    // ==============================================================
+
+    void test_proposal_creation() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        std::string proposal_id = _coordinator->createProposal(
+            "Test proposal",
+            0.6,
+            std::chrono::seconds(60)
+        );
+        
+        TS_ASSERT(!proposal_id.empty());
+        
+        auto proposal = _coordinator->getProposalInfo(proposal_id);
+        TS_ASSERT(proposal != nullptr);
+        TS_ASSERT_EQUALS(proposal->description, "Test proposal");
+        TS_ASSERT_DELTA(proposal->threshold, 0.6, 0.01);
+        TS_ASSERT_EQUALS(proposal->status, "voting");
+    }
+
+    void test_voting() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        AgentId agent1("Agent1");
+        AgentId agent2("Agent2");
+        
+        std::string proposal_id = _coordinator->createProposal("Test proposal");
+        
+        TS_ASSERT(_coordinator->castVote(proposal_id, agent1, true));
+        TS_ASSERT(_coordinator->castVote(proposal_id, agent2, false));
+        
+        auto proposal = _coordinator->getProposalInfo(proposal_id);
+        TS_ASSERT(proposal != nullptr);
+        TS_ASSERT_EQUALS(proposal->votes.size(), 2);
+    }
+
+    void test_consensus_reached() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        AgentId agent1("Agent1");
+        AgentId agent2("Agent2");
+        
+        std::string proposal_id = _coordinator->createProposal(
+            "Test proposal",
+            0.5  // 50% threshold
+        );
+        
+        _coordinator->castVote(proposal_id, agent1, true);
+        _coordinator->castVote(proposal_id, agent2, true);
+        
+        auto proposal = _coordinator->getProposalInfo(proposal_id);
+        TS_ASSERT(proposal != nullptr);
+        
+        // Manually check consensus (normally done by deadline check)
+        size_t agree_count = 0;
+        for (const auto& vote : proposal->votes) {
+            if (vote.second) agree_count++;
+        }
+        double ratio = static_cast<double>(agree_count) / proposal->votes.size();
+        TS_ASSERT(ratio >= 0.5);
+    }
+
+    // ==============================================================
+    // Resource Allocation Tests
+    // ==============================================================
+
+    void test_resource_registration() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        TS_ASSERT(_coordinator->registerResource("CPU", 100.0));
+        
+        double available = _coordinator->getAvailableResource("CPU");
+        TS_ASSERT_DELTA(available, 100.0, 0.01);
+    }
+
+    void test_resource_request() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        _coordinator->registerResource("Memory", 1000.0);
+        
+        AgentId agent1("Agent1");
+        std::string request_id = _coordinator->requestResource(
+            agent1, "Memory", 200.0, MessagePriority::NORMAL
+        );
+        
+        TS_ASSERT(!request_id.empty());
+        
+        double remaining = _coordinator->getAvailableResource("Memory");
+        TS_ASSERT_DELTA(remaining, 800.0, 0.01);
+    }
+
+    void test_resource_release() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        _coordinator->registerResource("GPU", 10.0);
+        
+        AgentId agent1("Agent1");
+        std::string request_id = _coordinator->requestResource(
+            agent1, "GPU", 5.0
+        );
+        
+        TS_ASSERT(!request_id.empty());
+        TS_ASSERT_DELTA(_coordinator->getAvailableResource("GPU"), 5.0, 0.01);
+        
+        TS_ASSERT(_coordinator->releaseResource(request_id));
+        TS_ASSERT_DELTA(_coordinator->getAvailableResource("GPU"), 10.0, 0.01);
+    }
+
+    void test_insufficient_resource() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        _coordinator->registerResource("Bandwidth", 100.0);
+        
+        AgentId agent1("Agent1");
+        std::string request_id = _coordinator->requestResource(
+            agent1, "Bandwidth", 200.0  // More than available
+        );
+        
+        // Should fail
+        TS_ASSERT(request_id.empty());
+    }
+
+    // ==============================================================
+    // Conflict Detection Tests
+    // ==============================================================
+
+    void test_conflict_detection() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        // Initially no conflicts
+        auto conflicts = _coordinator->detectConflicts();
+        TS_ASSERT_EQUALS(conflicts.size(), 0);
+        
+        // Create scenario with potential conflicts
+        AgentId agent1("Agent1");
+        std::vector<AgentCapability> caps;
+        _coordinator->registerAgent(agent1, caps);
+        
+        // Assign many tasks to one agent
+        for (int i = 0; i < 10; i++) {
+            std::string task_id = _coordinator->createTask("Task " + std::to_string(i), {});
+            _coordinator->assignTask(task_id, agent1);
+        }
+        
+        conflicts = _coordinator->detectConflicts();
+        TS_ASSERT(conflicts.size() > 0);
+    }
+
+    void test_conflict_resolution() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        bool success = _coordinator->resolveConflict(
+            "conflict1",
+            "reassign_tasks"
+        );
+        
+        TS_ASSERT(success);
+        
+        auto stats = _coordinator->getStatistics();
+        TS_ASSERT_EQUALS(stats.resolved_conflicts, 1);
+    }
+
+    // ==============================================================
+    // State Synchronization Tests
+    // ==============================================================
+
+    void test_state_synchronization() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        AgentId agent1("Agent1");
+        AgentId agent2("Agent2");
+        
+        std::vector<AgentCapability> caps;
+        _coordinator->registerAgent(agent1, caps);
+        _coordinator->registerAgent(agent2, caps);
+        
+        std::vector<AgentId> agents = {agent1, agent2};
+        bool success = _coordinator->synchronizeState(agents);
+        
+        // Will succeed if comms is initialized
+        TS_ASSERT(success);
+    }
+
+    void test_broadcast_state_update() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        AgentId agent1("Agent1");
+        AgentId agent2("Agent2");
+        
+        std::vector<AgentCapability> caps;
+        _coordinator->registerAgent(agent1, caps);
+        _coordinator->registerAgent(agent2, caps);
+        
+        size_t count = _coordinator->broadcastStateUpdate(
+            "config_update",
+            "new_config_value"
+        );
+        
+        // Should broadcast to 2 agents
+        TS_ASSERT_EQUALS(count, 2);
+    }
+
+    // ==============================================================
+    // Statistics and Monitoring Tests
+    // ==============================================================
+
+    void test_statistics() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        auto stats = _coordinator->getStatistics();
+        TS_ASSERT_EQUALS(stats.total_agents, 0);
+        TS_ASSERT_EQUALS(stats.total_tasks, 0);
+        TS_ASSERT_EQUALS(stats.total_proposals, 0);
+        
+        // Register some agents
+        AgentId agent1("Agent1");
+        std::vector<AgentCapability> caps;
+        _coordinator->registerAgent(agent1, caps);
+        
+        // Create some tasks
+        _coordinator->createTask("Task 1", {});
+        _coordinator->createTask("Task 2", {});
+        
+        // Create a proposal
+        _coordinator->createProposal("Proposal 1");
+        
+        stats = _coordinator->getStatistics();
+        TS_ASSERT_EQUALS(stats.total_agents, 1);
+        TS_ASSERT_EQUALS(stats.total_tasks, 2);
+        TS_ASSERT_EQUALS(stats.total_proposals, 1);
+    }
+
+    void test_active_agents_count() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        TS_ASSERT_EQUALS(_coordinator->getActiveAgentsCount(), 0);
+        
+        AgentId agent1("Agent1");
+        std::vector<AgentCapability> caps;
+        _coordinator->registerAgent(agent1, caps);
+        
+        TS_ASSERT_EQUALS(_coordinator->getActiveAgentsCount(), 1);
+        
+        _coordinator->updateAgentStatus(agent1, "offline");
+        TS_ASSERT_EQUALS(_coordinator->getActiveAgentsCount(), 0);
+    }
+
+    void test_pending_tasks_count() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        TS_ASSERT_EQUALS(_coordinator->getPendingTasksCount(), 0);
+        
+        std::string task1 = _coordinator->createTask("Task 1", {});
+        std::string task2 = _coordinator->createTask("Task 2", {});
+        
+        TS_ASSERT_EQUALS(_coordinator->getPendingTasksCount(), 2);
+        
+        _coordinator->updateTaskStatus(task1, "in_progress");
+        TS_ASSERT_EQUALS(_coordinator->getPendingTasksCount(), 1);
+    }
+
+    void test_system_health() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        // Initially unhealthy (no agents)
+        TS_ASSERT(!_coordinator->isHealthy());
+        
+        AgentId agent1("Agent1");
+        std::vector<AgentCapability> caps;
+        _coordinator->registerAgent(agent1, caps);
+        
+        // Now healthy (has active agent)
+        TS_ASSERT(_coordinator->isHealthy());
+    }
+
+    // ==============================================================
+    // AtomSpace Integration Tests
+    // ==============================================================
+
+    void test_atomspace_integration() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        // Verify coordination context exists
+        Handle coord_context = _atomspace->get_node(CONCEPT_NODE, "CoordinationContext");
+        TS_ASSERT(coord_context != Handle::UNDEFINED);
+        
+        // Register agent and verify atom created
+        AgentId agent1("TestAgent");
+        std::vector<AgentCapability> caps;
+        _coordinator->registerAgent(agent1, caps);
+        
+        Handle agent_node = _atomspace->get_node(CONCEPT_NODE, "Agent:TestAgent");
+        TS_ASSERT(agent_node != Handle::UNDEFINED);
+    }
+
+    void test_task_atomspace_representation() {
+        TS_ASSERT(_coordinator->initialize());
+        
+        std::string task_id = _coordinator->createTask("Test task", {});
+        
+        Handle task_node = _atomspace->get_node(CONCEPT_NODE, "Task:" + task_id);
+        TS_ASSERT(task_node != Handle::UNDEFINED);
+    }
+};

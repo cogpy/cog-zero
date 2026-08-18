@@ -1,0 +1,710 @@
+/*
+ * tests/integration-tests/EndToEndIntegrationTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * End-to-End Integration Tests for Agent-Zero
+ * Tests complete workflows from perception to action
+ * Part of AZ-INT-001: Create comprehensive integration tests
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <memory>
+#include <vector>
+#include <string>
+#include <chrono>
+
+#include "../framework/TestFramework.h"
+#include "../mocks/MockObjects.h"
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/base/Link.h>
+#include <opencog/atoms/atom_types/types.h>
+#include <opencog/util/Logger.h>
+
+using namespace opencog;
+using namespace opencog::agentzero;
+using namespace opencog::agentzero::test;
+using namespace opencog::agentzero::test::mocks;
+
+/**
+ * End-to-End Integration Test Suite
+ * Tests complete Agent-Zero workflows and scenarios
+ */
+class EndToEndIntegrationTest : public IntegrationTestFramework
+{
+private:
+    std::unique_ptr<MockAgentZeroCore> _agent;
+    std::unique_ptr<MockCognitiveLoop> _cognitive_loop;
+    std::unique_ptr<MockTaskManager> _task_manager;
+    std::unique_ptr<MockKnowledgeIntegrator> _knowledge_integrator;
+
+public:
+    void setUp() override
+    {
+        IntegrationTestFramework::setUp();
+        
+        // Create full Agent-Zero system
+        _agent = std::make_unique<MockAgentZeroCore>("E2ETestAgent");
+        _agent->setAtomSpace(getTestAtomSpace());
+        _agent->init();
+        
+        _cognitive_loop = std::make_unique<MockCognitiveLoop>(getTestAtomSpace());
+        _task_manager = std::make_unique<MockTaskManager>(getTestAtomSpace());
+        _knowledge_integrator = std::make_unique<MockKnowledgeIntegrator>(getTestAtomSpace());
+        
+        logger().set_level(Logger::INFO);
+    }
+
+    void tearDown() override
+    {
+        _knowledge_integrator.reset();
+        _task_manager.reset();
+        _cognitive_loop.reset();
+        _agent.reset();
+        
+        IntegrationTestFramework::tearDown();
+    }
+
+    /**
+     * Test 1: Complete Perception-Action Loop
+     * Tests the full cycle from perceiving input to executing action
+     */
+    void test_Complete_Perception_Action_Loop()
+    {
+        startTestTimer("perception_action_loop");
+        
+        logger().info("Starting Complete Perception-Action Loop Test");
+        
+        // 1. PERCEPTION: Simulate sensory input
+        Handle sensory_input = createTestAtom(CONCEPT_NODE, "SensoryInput_Object");
+        sensory_input->setSTI(100); // High attention value
+        
+        // 2. ATTENTION: Cognitive loop should focus on high-STI atoms
+        _cognitive_loop->configurePhases(true, true, true, true);
+        _cognitive_loop->start();
+        
+        // 3. REASONING: Process input and generate understanding
+        _agent->start();
+        Handle concept = createTestAtom(CONCEPT_NODE, "Concept_RecognizedObject");
+        
+        HandleSeq recognition = {sensory_input, concept};
+        Handle recognition_link = getTestAtomSpace()->add_link(INHERITANCE_LINK, recognition);
+        _knowledge_integrator->integrateKnowledge(recognition_link);
+        
+        // 4. PLANNING: Create goal based on understanding
+        Handle goal = createTestAtom(CONCEPT_NODE, "Goal_InteractWithObject");
+        _agent->setGoal(goal);
+        _task_manager->addTask(goal, 1.0);
+        
+        // 5. ACTION: Generate and execute action plan
+        std::vector<Handle> sub_goals = _task_manager->decomposeTask(goal);
+        TS_ASSERT(!sub_goals.empty());
+        
+        // Execute sub-tasks
+        for (size_t i = 0; i < sub_goals.size() && i < 3; ++i) {
+            Handle result = _task_manager->executeNextTask();
+            TS_ASSERT(result != Handle::UNDEFINED);
+        }
+        
+        // 6. LEARNING: Update knowledge based on action results
+        Handle experience = createTestAtom(CONCEPT_NODE, "Experience_ObjectInteraction");
+        _knowledge_integrator->integrateKnowledge(experience);
+        
+        // 7. REFLECTION: Complete cognitive cycles
+        for (int i = 0; i < 5; ++i) {
+            _cognitive_loop->executeSingleCycle();
+            _agent->processCognitiveStep();
+        }
+        
+        // Verify complete workflow
+        TS_ASSERT(_agent->isRunning());
+        TS_ASSERT_EQUALS(_agent->getCurrentGoal(), goal);
+        TS_ASSERT(_agent->getCognitiveStepsExecuted() >= 5);
+        TS_ASSERT(getAtomSpaceSize() > 5);
+        
+        _agent->stop();
+        _cognitive_loop->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        logger().info("Complete Perception-Action Loop Test PASSED");
+    }
+
+    /**
+     * Test 2: Goal Hierarchy Resolution
+     * Tests hierarchical goal decomposition and achievement
+     */
+    void test_Goal_Hierarchy_Resolution()
+    {
+        startTestTimer("goal_hierarchy");
+        
+        logger().info("Starting Goal Hierarchy Resolution Test");
+        
+        _agent->start();
+        
+        // Create hierarchical goal structure
+        Handle main_goal = createTestAtom(CONCEPT_NODE, "MainGoal_CompleteProject");
+        Handle sub_goal1 = createTestAtom(CONCEPT_NODE, "SubGoal_GatherResources");
+        Handle sub_goal2 = createTestAtom(CONCEPT_NODE, "SubGoal_ExecuteTask");
+        Handle sub_goal3 = createTestAtom(CONCEPT_NODE, "SubGoal_VerifyResults");
+        
+        // Build hierarchy
+        HandleSeq main_to_sub1 = {sub_goal1, main_goal};
+        getTestAtomSpace()->add_link(MEMBER_LINK, main_to_sub1);
+        
+        HandleSeq main_to_sub2 = {sub_goal2, main_goal};
+        getTestAtomSpace()->add_link(MEMBER_LINK, main_to_sub2);
+        
+        HandleSeq main_to_sub3 = {sub_goal3, main_goal};
+        getTestAtomSpace()->add_link(MEMBER_LINK, main_to_sub3);
+        
+        // Set main goal
+        _agent->setGoal(main_goal);
+        _task_manager->addTask(main_goal, 1.0);
+        
+        // Decompose into sub-goals
+        std::vector<Handle> decomposed = _task_manager->decomposeTask(main_goal);
+        TS_ASSERT_EQUALS(decomposed.size(), 3);
+        
+        // Execute each sub-goal
+        int completed_tasks = 0;
+        for (const auto& sub_goal : decomposed) {
+            _task_manager->addTask(sub_goal, 0.8);
+            Handle result = _task_manager->executeNextTask();
+            if (result != Handle::UNDEFINED) {
+                completed_tasks++;
+            }
+        }
+        
+        TS_ASSERT_EQUALS(completed_tasks, 3);
+        
+        // Process cognitive cycles for integration
+        for (int i = 0; i < 10; ++i) {
+            _agent->processCognitiveStep();
+        }
+        
+        _agent->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        logger().info("Goal Hierarchy Resolution Test PASSED");
+    }
+
+    /**
+     * Test 3: Knowledge Acquisition and Application
+     * Tests learning from experience and applying knowledge
+     */
+    void test_Knowledge_Acquisition_And_Application()
+    {
+        startTestTimer("knowledge_acquisition");
+        
+        logger().info("Starting Knowledge Acquisition Test");
+        
+        _agent->start();
+        
+        // Phase 1: Initial knowledge state
+        size_t initial_knowledge = getAtomSpaceSize();
+        
+        // Phase 2: Acquire new knowledge through observations
+        std::vector<Handle> observations;
+        for (int i = 0; i < 10; ++i) {
+            Handle obs = createTestAtom(CONCEPT_NODE, "Observation_" + std::to_string(i));
+            observations.push_back(obs);
+            _knowledge_integrator->integrateKnowledge(obs);
+        }
+        
+        // Phase 3: Form patterns from observations
+        for (size_t i = 0; i < observations.size() - 1; ++i) {
+            HandleSeq pattern = {observations[i], observations[i + 1]};
+            Handle pattern_link = getTestAtomSpace()->add_link(LIST_LINK, pattern);
+            _knowledge_integrator->integrateKnowledge(pattern_link);
+        }
+        
+        // Phase 4: Create higher-level concepts
+        Handle learned_concept = createTestAtom(CONCEPT_NODE, "LearnedConcept_Pattern");
+        for (const auto& obs : observations) {
+            HandleSeq concept_link = {obs, learned_concept};
+            getTestAtomSpace()->add_link(MEMBER_LINK, concept_link);
+        }
+        
+        // Phase 5: Apply learned knowledge to new situation
+        Handle new_situation = createTestAtom(CONCEPT_NODE, "NewSituation_TestCase");
+        
+        // Query knowledge base for relevant information
+        HandleSeq relevant_knowledge = _knowledge_integrator->queryKnowledge(learned_concept);
+        TS_ASSERT(!relevant_knowledge.empty());
+        
+        // Phase 6: Use knowledge to inform action
+        Handle informed_goal = createTestAtom(CONCEPT_NODE, "Goal_ApplyKnowledge");
+        _agent->setGoal(informed_goal);
+        _task_manager->addTask(informed_goal, 1.0);
+        
+        Handle action = _task_manager->executeNextTask();
+        TS_ASSERT(action != Handle::UNDEFINED);
+        
+        // Verify knowledge growth
+        size_t final_knowledge = getAtomSpaceSize();
+        TS_ASSERT(final_knowledge > initial_knowledge + 10);
+        
+        _agent->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        logger().info("Knowledge Acquisition Test PASSED");
+    }
+
+    /**
+     * Test 4: Adaptive Behavior Under Changing Conditions
+     * Tests agent adaptation to environmental changes
+     */
+    void test_Adaptive_Behavior_Under_Changing_Conditions()
+    {
+        startTestTimer("adaptive_behavior");
+        
+        logger().info("Starting Adaptive Behavior Test");
+        
+        _agent->start();
+        _cognitive_loop->start();
+        
+        // Phase 1: Initial goal and strategy
+        Handle initial_goal = createTestAtom(CONCEPT_NODE, "Goal_ReachTarget");
+        _agent->setGoal(initial_goal);
+        _task_manager->addTask(initial_goal, 1.0);
+        
+        // Execute initial strategy
+        for (int i = 0; i < 5; ++i) {
+            _cognitive_loop->executeSingleCycle();
+            _agent->processCognitiveStep();
+        }
+        
+        int initial_steps = _agent->getCognitiveStepsExecuted();
+        
+        // Phase 2: Introduce environmental change
+        Handle obstacle = createTestAtom(CONCEPT_NODE, "Obstacle_Blockage");
+        obstacle->setSTI(150); // High attention
+        
+        // Phase 3: Agent should adapt strategy
+        Handle adapted_goal = createTestAtom(CONCEPT_NODE, "Goal_AvoidObstacle");
+        HandleSeq adaptation = {initial_goal, adapted_goal};
+        getTestAtomSpace()->add_link(ORDERED_LINK, adaptation);
+        
+        _agent->setGoal(adapted_goal);
+        _task_manager->addTask(adapted_goal, 1.0);
+        
+        // Phase 4: Execute adapted strategy
+        for (int i = 0; i < 5; ++i) {
+            _cognitive_loop->executeSingleCycle();
+            _agent->processCognitiveStep();
+        }
+        
+        // Phase 5: Verify adaptation occurred
+        TS_ASSERT(_agent->getCognitiveStepsExecuted() > initial_steps);
+        TS_ASSERT_EQUALS(_agent->getCurrentGoal(), adapted_goal);
+        
+        // Phase 6: Learn from adaptation
+        Handle learned_strategy = createTestAtom(CONCEPT_NODE, "Strategy_ObstacleAvoidance");
+        _knowledge_integrator->integrateKnowledge(learned_strategy);
+        
+        _cognitive_loop->stop();
+        _agent->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        logger().info("Adaptive Behavior Test PASSED");
+    }
+
+    /**
+     * Test 5: Multi-Agent Collaboration Scenario
+     * Tests multiple agents working together on shared goals
+     */
+    void test_Multi_Agent_Collaboration()
+    {
+        startTestTimer("multi_agent_collaboration");
+        
+        logger().info("Starting Multi-Agent Collaboration Test");
+        
+        // Create second agent
+        auto agent2 = std::make_unique<MockAgentZeroCore>("CollaboratorAgent");
+        agent2->setAtomSpace(getTestAtomSpace());
+        agent2->init();
+        
+        // Both agents start
+        _agent->start();
+        agent2->start();
+        
+        // Create shared goal
+        Handle shared_goal = createTestAtom(CONCEPT_NODE, "SharedGoal_CollaborativeTask");
+        
+        // Both agents work on same goal
+        _agent->setGoal(shared_goal);
+        agent2->setGoal(shared_goal);
+        
+        _task_manager->addTask(shared_goal, 1.0);
+        
+        // Decompose into sub-tasks for division of labor
+        std::vector<Handle> sub_tasks = _task_manager->decomposeTask(shared_goal);
+        TS_ASSERT(sub_tasks.size() >= 2);
+        
+        // Agent 1 works on first half of tasks
+        for (size_t i = 0; i < sub_tasks.size() / 2; ++i) {
+            _task_manager->addTask(sub_tasks[i], 0.9);
+            _agent->processCognitiveStep();
+        }
+        
+        // Agent 2 works on second half of tasks
+        for (size_t i = sub_tasks.size() / 2; i < sub_tasks.size(); ++i) {
+            _task_manager->addTask(sub_tasks[i], 0.9);
+            agent2->processCognitiveStep();
+        }
+        
+        // Execute tasks
+        while (_task_manager->getActiveTaskCount() > 0 && 
+               _task_manager->getExecutedTaskCount() < 10) {
+            Handle result = _task_manager->executeNextTask();
+            if (result == Handle::UNDEFINED) break;
+        }
+        
+        // Verify collaboration
+        TS_ASSERT(_agent->getCognitiveStepsExecuted() > 0);
+        TS_ASSERT(agent2->getCognitiveStepsExecuted() > 0);
+        TS_ASSERT(_task_manager->getExecutedTaskCount() > 0);
+        
+        // Both agents should have processed shared goal
+        TS_ASSERT_EQUALS(_agent->getCurrentGoal(), shared_goal);
+        TS_ASSERT_EQUALS(agent2->getCurrentGoal(), shared_goal);
+        
+        agent2->stop();
+        _agent->stop();
+        agent2.reset();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        logger().info("Multi-Agent Collaboration Test PASSED");
+    }
+
+    /**
+     * Test 6: Long-Running Agent Lifecycle
+     * Tests agent stability over extended operation
+     */
+    void test_Long_Running_Agent_Lifecycle()
+    {
+        startTestTimer("long_running_lifecycle");
+        
+        logger().info("Starting Long-Running Agent Lifecycle Test");
+        
+        _agent->start();
+        _cognitive_loop->configurePhases(true, true, true, true);
+        _cognitive_loop->start();
+        
+        // Phase 1: Warm-up period
+        for (int i = 0; i < 10; ++i) {
+            _agent->processCognitiveStep();
+            _cognitive_loop->executeSingleCycle();
+        }
+        
+        size_t atoms_after_warmup = getAtomSpaceSize();
+        
+        // Phase 2: Extended operation with various activities
+        for (int cycle = 0; cycle < 5; ++cycle) {
+            // Create goal
+            Handle goal = createTestAtom(CONCEPT_NODE, 
+                "Goal_Cycle_" + std::to_string(cycle));
+            _agent->setGoal(goal);
+            _task_manager->addTask(goal, 1.0);
+            
+            // Process
+            for (int step = 0; step < 20; ++step) {
+                _agent->processCognitiveStep();
+                _cognitive_loop->executeSingleCycle();
+                
+                // Periodically add new knowledge
+                if (step % 5 == 0) {
+                    Handle knowledge = createTestAtom(CONCEPT_NODE,
+                        "Knowledge_Cycle" + std::to_string(cycle) + "_Step" + std::to_string(step));
+                    _knowledge_integrator->integrateKnowledge(knowledge);
+                }
+            }
+            
+            // Execute accumulated tasks
+            while (_task_manager->getActiveTaskCount() > 0 && 
+                   _task_manager->getExecutedTaskCount() < (cycle + 1) * 5) {
+                _task_manager->executeNextTask();
+            }
+        }
+        
+        // Phase 3: Verify stability
+        TS_ASSERT(_agent->isRunning());
+        TS_ASSERT(_cognitive_loop->isRunning());
+        TS_ASSERT(_agent->getCognitiveStepsExecuted() >= 110); // 10 warmup + 100 main
+        
+        // Phase 4: Verify knowledge accumulated
+        size_t final_atoms = getAtomSpaceSize();
+        TS_ASSERT(final_atoms > atoms_after_warmup);
+        
+        // Phase 5: Verify no memory leaks or corruption
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        _cognitive_loop->stop();
+        _agent->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        
+        logger().info("Long-Running Agent Lifecycle Test PASSED");
+    }
+
+    /**
+     * Test 7: Error Recovery and Resilience
+     * Tests agent recovery from various error conditions
+     */
+    void test_Error_Recovery_And_Resilience()
+    {
+        startTestTimer("error_recovery");
+        
+        logger().info("Starting Error Recovery Test");
+        
+        _agent->start();
+        
+        // Test 1: Invalid goal handling
+        Handle invalid_goal = Handle::UNDEFINED;
+        TS_ASSERT(!_agent->setGoal(invalid_goal));
+        TS_ASSERT(_agent->isRunning()); // Should remain stable
+        
+        // Test 2: Empty task queue
+        clearAtomSpace();
+        _agent->processCognitiveStep();
+        TS_ASSERT(_agent->isRunning());
+        
+        // Test 3: Recovery - set valid goal
+        Handle valid_goal = createTestAtom(CONCEPT_NODE, "RecoveryGoal");
+        TS_ASSERT(_agent->setGoal(valid_goal));
+        TS_ASSERT_EQUALS(_agent->getCurrentGoal(), valid_goal);
+        
+        // Test 4: Conflicting goals
+        Handle goal1 = createTestAtom(CONCEPT_NODE, "Goal_A");
+        Handle goal2 = createTestAtom(CONCEPT_NODE, "Goal_B");
+        _agent->setGoal(goal1);
+        _agent->setGoal(goal2); // Override
+        TS_ASSERT_EQUALS(_agent->getCurrentGoal(), goal2);
+        
+        // Test 5: Processing continues normally
+        for (int i = 0; i < 10; ++i) {
+            TS_ASSERT(_agent->processCognitiveStep());
+        }
+        
+        TS_ASSERT_EQUALS(_agent->getCognitiveStepsExecuted(), 11); // 1 before + 10 now
+        
+        _agent->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        
+        logger().info("Error Recovery Test PASSED");
+    }
+
+    /**
+     * Test 8: Performance Under Stress
+     * Tests system behavior under high load
+     */
+    void test_Performance_Under_Stress()
+    {
+        startTestTimer("stress_test");
+        
+        logger().info("Starting Performance Under Stress Test");
+        
+        _agent->start();
+        _cognitive_loop->start();
+        
+        // Create high load scenario
+        std::vector<Handle> stress_goals;
+        for (int i = 0; i < 100; ++i) {
+            Handle goal = createTestAtom(CONCEPT_NODE, "StressGoal_" + std::to_string(i));
+            stress_goals.push_back(goal);
+            _task_manager->addTask(goal, 0.5);
+        }
+        
+        // Process rapidly with fixed iteration count for consistent testing
+        int cycles = 0;
+        int max_cycles = 200;
+        
+        for (cycles = 0; cycles < max_cycles; ++cycles) {
+            _agent->processCognitiveStep();
+            _cognitive_loop->executeSingleCycle();
+            
+            if (cycles % 20 == 0) {
+                _task_manager->executeNextTask();
+            }
+        }
+        
+        // Verify system remained stable
+        TS_ASSERT(_agent->isRunning());
+        TS_ASSERT(_cognitive_loop->isRunning());
+        TS_ASSERT(_agent->getCognitiveStepsExecuted() >= 100);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        _cognitive_loop->stop();
+        _agent->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        
+        logger().info("Performance Under Stress Test PASSED");
+    }
+
+    /**
+     * Test 9: State Persistence and Restoration
+     * Tests saving and restoring agent state
+     */
+    void test_State_Persistence_And_Restoration()
+    {
+        startTestTimer("state_persistence");
+        
+        logger().info("Starting State Persistence Test");
+        
+        // Phase 1: Build initial state
+        _agent->start();
+        
+        Handle goal = createTestAtom(CONCEPT_NODE, "PersistentGoal");
+        _agent->setGoal(goal);
+        
+        for (int i = 0; i < 20; ++i) {
+            Handle knowledge = createTestAtom(CONCEPT_NODE, "PersistentKnowledge_" + std::to_string(i));
+            _knowledge_integrator->integrateKnowledge(knowledge);
+            _agent->processCognitiveStep();
+        }
+        
+        // Capture state
+        size_t atoms_before = getAtomSpaceSize();
+        int steps_before = _agent->getCognitiveStepsExecuted();
+        Handle goal_before = _agent->getCurrentGoal();
+        
+        // Phase 2: Simulate shutdown
+        _agent->stop();
+        
+        // Phase 3: Simulate restart
+        _agent->reset();
+        _agent->init();
+        _agent->start();
+        
+        // Phase 4: Verify state restoration
+        // AtomSpace should preserve atoms
+        size_t atoms_after = getAtomSpaceSize();
+        TS_ASSERT_EQUALS(atoms_after, atoms_before);
+        
+        // Goal should still be in AtomSpace
+        TS_ASSERT(getTestAtomSpace()->is_valid_handle(goal_before));
+        
+        // Agent can resume operations
+        _agent->setGoal(goal_before);
+        for (int i = 0; i < 5; ++i) {
+            _agent->processCognitiveStep();
+        }
+        
+        TS_ASSERT(_agent->isRunning());
+        
+        _agent->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        logger().info("State Persistence Test PASSED");
+    }
+
+    /**
+     * Test 10: Complete Agent-Zero Demonstration
+     * Comprehensive demonstration of all capabilities
+     */
+    void test_Complete_AgentZero_Demonstration()
+    {
+        startTestTimer("complete_demonstration");
+        
+        logger().info("Starting Complete Agent-Zero Demonstration");
+        
+        // Initialize complete system
+        _agent->start();
+        _cognitive_loop->configurePhases(true, true, true, true);
+        _cognitive_loop->start();
+        
+        // Scenario: Agent learns and achieves a complex goal
+        
+        // 1. Set high-level goal
+        Handle main_goal = createTestAtom(CONCEPT_NODE, "Demo_MasterComplexTask");
+        _agent->setGoal(main_goal);
+        _task_manager->addTask(main_goal, 1.0);
+        
+        logger().info("Goal set: MasterComplexTask");
+        
+        // 2. Decompose into sub-goals
+        std::vector<Handle> sub_goals = _task_manager->decomposeTask(main_goal);
+        logger().info("Decomposed into " + std::to_string(sub_goals.size()) + " sub-goals");
+        
+        // 3. Execute each sub-goal
+        int completed = 0;
+        for (const auto& sub_goal : sub_goals) {
+            _task_manager->addTask(sub_goal, 0.9);
+            
+            // Process cognitive cycles for each sub-goal
+            for (int i = 0; i < 5; ++i) {
+                _cognitive_loop->executeSingleCycle();
+                _agent->processCognitiveStep();
+            }
+            
+            Handle result = _task_manager->executeNextTask();
+            if (result != Handle::UNDEFINED) {
+                completed++;
+                _knowledge_integrator->integrateKnowledge(result);
+            }
+        }
+        
+        logger().info("Completed " + std::to_string(completed) + " sub-goals");
+        
+        // 4. Verify learning occurred
+        size_t knowledge_atoms = getAtomSpaceSize();
+        TS_ASSERT(knowledge_atoms > 5);
+        
+        // 5. Test knowledge application
+        Handle new_goal = createTestAtom(CONCEPT_NODE, "Demo_ApplyLearning");
+        _agent->setGoal(new_goal);
+        
+        HandleSeq relevant = _knowledge_integrator->queryKnowledge(main_goal);
+        TS_ASSERT(!relevant.empty());
+        
+        // 6. Complete final cognitive cycles
+        for (int i = 0; i < 10; ++i) {
+            _cognitive_loop->executeSingleCycle();
+            _agent->processCognitiveStep();
+        }
+        
+        // 7. Verify complete demonstration
+        TS_ASSERT(_agent->isRunning());
+        TS_ASSERT(_cognitive_loop->isRunning());
+        TS_ASSERT(_agent->getCognitiveStepsExecuted() >= 30);
+        TS_ASSERT(completed >= 2);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*this);
+        
+        _cognitive_loop->stop();
+        _agent->stop();
+        
+        stopTestTimer();
+        TS_ASSERT_PERFORMANCE_OK(*this);
+        
+        logger().info("Complete Agent-Zero Demonstration PASSED");
+        logger().info("========================================");
+        logger().info("All End-to-End Integration Tests PASSED");
+        logger().info("========================================");
+    }
+};

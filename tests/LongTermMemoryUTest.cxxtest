@@ -1,0 +1,176 @@
+/*
+ * tests/LongTermMemoryUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for LongTermMemory
+ * Part of the AGENT-ZERO-GENESIS project - AZ-MEM-003
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/atom_types/atom_types.h>
+#include <opencog/agentzero/memory/LongTermMemory.h>
+
+using namespace opencog;
+using namespace opencog::agentzero::memory;
+
+class LongTermMemoryUTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr _atomspace;
+    std::unique_ptr<LongTermMemory> _ltm;
+    std::string _test_storage_path;
+
+public:
+    void setUp()
+    {
+        _atomspace = std::make_shared<AtomSpace>();
+        _test_storage_path = "/tmp/ltm_test_" + std::to_string(getpid());
+        
+        // Clean up any existing test data
+        std::filesystem::remove_all(_test_storage_path);
+        
+        MemoryConfig config;
+        config.persistence_directory = _test_storage_path;
+        config.max_memory_count = 1000;
+        config.consolidation_interval = std::chrono::milliseconds(100);
+        
+        _ltm = std::make_unique<LongTermMemory>(_atomspace, config);
+    }
+
+    void tearDown()
+    {
+        if (_ltm) {
+            _ltm->shutdown();
+            _ltm.reset();
+        }
+        
+        // Clean up test data
+        std::filesystem::remove_all(_test_storage_path);
+    }
+
+    void test_initialization()
+    {
+        TS_ASSERT(_ltm != nullptr);
+        TS_ASSERT(_ltm->initialize());
+        TS_ASSERT(_ltm->isHealthy());
+    }
+
+    void test_basic_storage_and_retrieval()
+    {
+        TS_ASSERT(_ltm->initialize());
+        
+        // Create a test node
+        Handle test_node = _atomspace->add_node(CONCEPT_NODE, "test_concept");
+        TS_ASSERT(test_node != Handle::UNDEFINED);
+        
+        // Store the node
+        TS_ASSERT(_ltm->store(test_node, MemoryImportance::HIGH));
+        
+        // Check if it exists
+        TS_ASSERT(_ltm->contains(test_node));
+        
+        // Retrieve the node
+        Handle retrieved = _ltm->retrieve(test_node);
+        TS_ASSERT(retrieved == test_node);
+    }
+
+    void test_importance_based_retrieval()
+    {
+        TS_ASSERT(_ltm->initialize());
+        
+        // Create nodes with different importance levels
+        Handle high_node = _atomspace->add_node(CONCEPT_NODE, "high_importance");
+        Handle medium_node = _atomspace->add_node(CONCEPT_NODE, "medium_importance");
+        Handle low_node = _atomspace->add_node(CONCEPT_NODE, "low_importance");
+        
+        // Store with different importance levels
+        TS_ASSERT(_ltm->store(high_node, MemoryImportance::HIGH));
+        TS_ASSERT(_ltm->store(medium_node, MemoryImportance::MEDIUM));
+        TS_ASSERT(_ltm->store(low_node, MemoryImportance::LOW));
+        
+        // Find by importance
+        auto high_importance_memories = _ltm->findByImportance(MemoryImportance::HIGH);
+        TS_ASSERT(!high_importance_memories.empty());
+        
+        auto medium_importance_memories = _ltm->findByImportance(MemoryImportance::MEDIUM);
+        TS_ASSERT(medium_importance_memories.size() >= 2);  // Should include HIGH and MEDIUM
+    }
+
+    void test_context_based_storage()
+    {
+        TS_ASSERT(_ltm->initialize());
+        
+        Handle temporal_node = _atomspace->add_node(CONCEPT_NODE, "temporal_concept");
+        Handle spatial_node = _atomspace->add_node(CONCEPT_NODE, "spatial_concept");
+        
+        // Store with different contexts
+        std::vector<ContextType> temporal_context = {ContextType::TEMPORAL};
+        std::vector<ContextType> spatial_context = {ContextType::SPATIAL};
+        
+        TS_ASSERT(_ltm->store(temporal_node, MemoryImportance::MEDIUM, 
+                             PersistenceLevel::LONG_TERM, temporal_context));
+        TS_ASSERT(_ltm->store(spatial_node, MemoryImportance::MEDIUM,
+                             PersistenceLevel::LONG_TERM, spatial_context));
+        
+        // Find by context
+        auto temporal_memories = _ltm->findByContext(ContextType::TEMPORAL);
+        auto spatial_memories = _ltm->findByContext(ContextType::SPATIAL);
+        
+        TS_ASSERT(!temporal_memories.empty());
+        TS_ASSERT(!spatial_memories.empty());
+    }
+
+    void test_memory_removal()
+    {
+        TS_ASSERT(_ltm->initialize());
+        
+        Handle test_node = _atomspace->add_node(CONCEPT_NODE, "removable_concept");
+        
+        // Store and verify
+        TS_ASSERT(_ltm->store(test_node));
+        TS_ASSERT(_ltm->contains(test_node));
+        
+        // Remove and verify
+        TS_ASSERT(_ltm->remove(test_node));
+        TS_ASSERT(!_ltm->contains(test_node));
+    }
+
+    void test_statistics_collection()
+    {
+        TS_ASSERT(_ltm->initialize());
+        
+        // Perform some operations
+        Handle node1 = _atomspace->add_node(CONCEPT_NODE, "stats_test_1");
+        Handle node2 = _atomspace->add_node(CONCEPT_NODE, "stats_test_2");
+        
+        _ltm->store(node1);
+        _ltm->store(node2);
+        _ltm->retrieve(node1);
+        _ltm->retrieve(node2);
+        
+        // Check statistics
+        auto stats = _ltm->getStatistics();
+        TS_ASSERT(stats.write_operations >= 2);
+        TS_ASSERT(stats.read_operations >= 2);
+    }
+
+    void test_configuration_management()
+    {
+        auto config = _ltm->getConfig();
+        TS_ASSERT(config.persistence_directory == _test_storage_path);
+        TS_ASSERT(config.max_memory_count == 1000);
+    }
+
+    void test_system_status()
+    {
+        TS_ASSERT(_ltm->initialize());
+        
+        std::string status = _ltm->getSystemStatus();
+        TS_ASSERT(!status.empty());
+        TS_ASSERT(status.find("LongTermMemory System Status") != std::string::npos);
+    }
+};

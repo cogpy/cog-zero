@@ -1,0 +1,465 @@
+/*
+ * tests/EpisodicMemoryUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for EpisodicMemory class
+ * Part of AZ-MEM-001: Implement EpisodicMemory with temporal sequences
+ */
+
+#include <cxxtest/TestSuite.h>
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/base/Link.h>
+#include <opencog/atoms/atom_types/atom_types.h>
+#include <opencog/util/Logger.h>
+
+#include "opencog/agentzero/learning/EpisodicMemory.h"
+
+using namespace opencog;
+using namespace opencog::agentzero::learning;
+
+class EpisodicMemoryUTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr atomspace;
+    std::unique_ptr<EpisodicMemory> episodic_memory;
+    
+    // Test atoms for sequences and contexts
+    Handle action1, action2, action3;
+    Handle context1, context2, context3;
+    Handle goal1, goal2;
+
+public:
+    void setUp()
+    {
+        logger().set_level(Logger::DEBUG);
+        logger().set_print_to_stdout_flag(true);
+        
+        atomspace = std::make_shared<AtomSpace>();
+        episodic_memory = std::make_unique<EpisodicMemory>(atomspace);
+        
+        // Create test atoms
+        action1 = atomspace->add_node(CONCEPT_NODE, "action_move_forward");
+        action2 = atomspace->add_node(CONCEPT_NODE, "action_turn_left");
+        action3 = atomspace->add_node(CONCEPT_NODE, "action_grasp_object");
+        
+        context1 = atomspace->add_node(CONCEPT_NODE, "context_indoor");
+        context2 = atomspace->add_node(CONCEPT_NODE, "context_obstacle_present");
+        context3 = atomspace->add_node(CONCEPT_NODE, "context_object_nearby");
+        
+        goal1 = atomspace->add_node(CONCEPT_NODE, "goal_reach_destination");
+        goal2 = atomspace->add_node(CONCEPT_NODE, "goal_collect_object");
+    }
+
+    void tearDown()
+    {
+        episodic_memory.reset();
+        atomspace.reset();
+    }
+
+    void testInitialization()
+    {
+        TS_ASSERT(episodic_memory != nullptr);
+        TS_ASSERT(atomspace != nullptr);
+        TS_ASSERT_EQUALS(episodic_memory->getEpisodeCount(), 0);
+        TS_ASSERT_EQUALS(episodic_memory->getPatternCount(), 0);
+        
+        // Test that AtomSpace structures are created
+        Handle memory_base = episodic_memory->getEpisodicMemoryBase();
+        TS_ASSERT(memory_base != Handle::UNDEFINED);
+        
+        logger().info("EpisodicMemoryUTest: Initialization test passed");
+    }
+
+    void testBasicEpisodeRecording()
+    {
+        // Create a simple sequence
+        std::vector<Handle> sequence = {action1, action2, action3};
+        std::vector<Handle> context = {context1, context2};
+        
+        // Record episode
+        std::string episode_id = episodic_memory->recordEpisode(
+            "Test navigation sequence",
+            sequence,
+            context
+        );
+        
+        TS_ASSERT(!episode_id.empty());
+        TS_ASSERT_EQUALS(episodic_memory->getEpisodeCount(), 1);
+        
+        // Get statistics
+        auto stats = episodic_memory->getEpisodeStatistics();
+        TS_ASSERT_EQUALS(stats["total_episodes"], 1.0);
+        TS_ASSERT(stats["average_sequence_length"] > 0.0);
+        
+        logger().info("EpisodicMemoryUTest: Basic episode recording test passed");
+    }
+
+    void testTemporalSequenceRecording()
+    {
+        auto start_time = std::chrono::system_clock::now();
+        auto end_time = start_time + std::chrono::seconds(5);
+        
+        std::vector<Handle> sequence = {action1, action2};
+        std::vector<Handle> context = {context1};
+        
+        std::string episode_id = episodic_memory->recordEpisode(
+            "Timed sequence",
+            sequence,
+            context,
+            start_time,
+            end_time
+        );
+        
+        TS_ASSERT(!episode_id.empty());
+        
+        // Test temporal retrieval
+        EpisodicMemory::SequenceQuery query;
+        query.start_time = start_time - std::chrono::seconds(1);
+        query.end_time = end_time + std::chrono::seconds(1);
+        query.max_episodes = 10;
+        
+        auto retrieved_episodes = episodic_memory->getTemporalSequences(query);
+        TS_ASSERT_EQUALS(retrieved_episodes.size(), 1);
+        TS_ASSERT_EQUALS(retrieved_episodes[0].episode_id, episode_id);
+        
+        logger().info("EpisodicMemoryUTest: Temporal sequence recording test passed");
+    }
+
+    void testEpisodeRetrievalByContext()
+    {
+        // Record multiple episodes with different contexts
+        std::vector<Handle> sequence1 = {action1, action2};
+        std::vector<Handle> context_indoor = {context1};
+        
+        std::vector<Handle> sequence2 = {action2, action3};
+        std::vector<Handle> context_outdoor = {context2};
+        
+        std::vector<Handle> sequence3 = {action1, action3};
+        std::vector<Handle> context_mixed = {context1, context3};
+        
+        std::string ep1 = episodic_memory->recordEpisode("Indoor navigation", sequence1, context_indoor);
+        std::string ep2 = episodic_memory->recordEpisode("Outdoor navigation", sequence2, context_outdoor);
+        std::string ep3 = episodic_memory->recordEpisode("Mixed context", sequence3, context_mixed);
+        
+        TS_ASSERT_EQUALS(episodic_memory->getEpisodeCount(), 3);
+        
+        // Test context-based similarity retrieval
+        EpisodicMemory::EpisodeContext query_context;
+        query_context.environmental_state = {context1}; // Indoor context
+        query_context.query_time = std::chrono::system_clock::now();
+        
+        auto similar_episodes = episodic_memory->getSimilarEpisodes(query_context, 5);
+        TS_ASSERT(similar_episodes.size() >= 1);
+        
+        // Should include episodes with context1
+        bool found_indoor = false;
+        for (const auto& episode : similar_episodes) {
+            if (episode.episode_id == ep1 || episode.episode_id == ep3) {
+                found_indoor = true;
+                break;
+            }
+        }
+        TS_ASSERT(found_indoor);
+        
+        logger().info("EpisodicMemoryUTest: Context-based retrieval test passed");
+    }
+
+    void testTemporalCoherenceAnalysis()
+    {
+        // Test coherence calculation
+        std::vector<Handle> coherent_sequence = {action1, action2, action3};
+        double coherence = episodic_memory->analyzeTemporalCoherence(coherent_sequence);
+        
+        TS_ASSERT(coherence > 0.0);
+        TS_ASSERT(coherence <= 1.0);
+        
+        // Empty sequence should have perfect coherence
+        std::vector<Handle> empty_sequence;
+        double empty_coherence = episodic_memory->analyzeTemporalCoherence(empty_sequence);
+        TS_ASSERT_EQUALS(empty_coherence, 1.0);
+        
+        // Single atom should have perfect coherence
+        std::vector<Handle> single_sequence = {action1};
+        double single_coherence = episodic_memory->analyzeTemporalCoherence(single_sequence);
+        TS_ASSERT_EQUALS(single_coherence, 1.0);
+        
+        logger().info("EpisodicMemoryUTest: Temporal coherence analysis test passed");
+    }
+
+    void testSequencePrediction()
+    {
+        // Record several episodes with similar patterns
+        std::vector<Handle> pattern1 = {action1, action2, action3};
+        std::vector<Handle> pattern2 = {action1, action2, action3};
+        std::vector<Handle> pattern3 = {action1, action2, goal1}; // Different ending
+        
+        std::vector<Handle> context = {context1};
+        
+        episodic_memory->recordEpisode("Pattern 1", pattern1, context);
+        episodic_memory->recordEpisode("Pattern 2", pattern2, context);
+        episodic_memory->recordEpisode("Pattern 3", pattern3, context);
+        
+        // Test prediction for partial sequence
+        std::vector<Handle> partial_sequence = {action1, action2};
+        EpisodicMemory::EpisodeContext pred_context;
+        pred_context.environmental_state = context;
+        
+        auto predictions = episodic_memory->predictNextInSequence(partial_sequence, pred_context);
+        
+        TS_ASSERT(predictions.size() > 0);
+        
+        // action3 should be the most likely prediction (2 out of 3 patterns)
+        bool found_action3 = false;
+        for (const auto& pred : predictions) {
+            if (pred.first == action3 && pred.second > 0.0) {
+                found_action3 = true;
+                break;
+            }
+        }
+        TS_ASSERT(found_action3);
+        
+        logger().info("EpisodicMemoryUTest: Sequence prediction test passed");
+    }
+
+    void testTimeRangeRetrieval()
+    {
+        auto base_time = std::chrono::system_clock::now();
+        
+        // Record episodes at different times
+        auto time1 = base_time - std::chrono::minutes(10);
+        auto time2 = base_time - std::chrono::minutes(5);
+        auto time3 = base_time;
+        
+        std::vector<Handle> sequence = {action1, action2};
+        std::vector<Handle> context = {context1};
+        
+        episodic_memory->recordEpisode("Episode 1", sequence, context, time1, time1);
+        episodic_memory->recordEpisode("Episode 2", sequence, context, time2, time2);
+        episodic_memory->recordEpisode("Episode 3", sequence, context, time3, time3);
+        
+        // Query for episodes in specific time range
+        auto start_range = base_time - std::chrono::minutes(7);
+        auto end_range = base_time + std::chrono::minutes(1);
+        
+        auto episodes_in_range = episodic_memory->getEpisodesInTimeRange(start_range, end_range);
+        
+        TS_ASSERT_EQUALS(episodes_in_range.size(), 2); // Episodes 2 and 3
+        
+        // Check chronological ordering
+        if (episodes_in_range.size() >= 2) {
+            TS_ASSERT(episodes_in_range[0].start_time <= episodes_in_range[1].start_time);
+        }
+        
+        logger().info("EpisodicMemoryUTest: Time range retrieval test passed");
+    }
+
+    void testPatternDiscovery()
+    {
+        episodic_memory->enablePatternDiscovery(true);
+        
+        // Record multiple episodes with repeating patterns
+        std::vector<Handle> common_pattern = {action1, action2};
+        std::vector<Handle> context = {context1};
+        
+        for (int i = 0; i < 5; ++i) {
+            episodic_memory->recordEpisode(
+                "Pattern episode " + std::to_string(i),
+                common_pattern,
+                context
+            );
+        }
+        
+        // Force pattern discovery
+        episodic_memory->processEpisodicMemory();
+        
+        // Get discovered patterns
+        auto patterns = episodic_memory->getTemporalPatterns(0.1, 0.1); // Low thresholds
+        
+        TS_ASSERT(patterns.size() > 0);
+        
+        // Should find the common pattern
+        bool found_pattern = false;
+        for (const auto& pattern : patterns) {
+            if (pattern.pattern_sequence.size() == 2 &&
+                pattern.pattern_sequence[0] == action1 &&
+                pattern.pattern_sequence[1] == action2) {
+                found_pattern = true;
+                TS_ASSERT(pattern.frequency > 0.0);
+                break;
+            }
+        }
+        TS_ASSERT(found_pattern);
+        
+        logger().info("EpisodicMemoryUTest: Pattern discovery test passed");
+    }
+
+    void testMemoryConsolidation()
+    {
+        // Record similar episodes that should be consolidated
+        std::vector<Handle> sequence1 = {action1, action2};
+        std::vector<Handle> sequence2 = {action1, action2}; // Identical
+        std::vector<Handle> sequence3 = {action1, action3}; // Different
+        
+        std::vector<Handle> context = {context1};
+        
+        episodic_memory->recordEpisode("Similar 1", sequence1, context);
+        episodic_memory->recordEpisode("Similar 2", sequence2, context);
+        episodic_memory->recordEpisode("Different", sequence3, context);
+        
+        TS_ASSERT_EQUALS(episodic_memory->getEpisodeCount(), 3);
+        
+        // Set low consolidation threshold to trigger merging
+        episodic_memory->setConsolidationThreshold(0.7);
+        
+        // Perform consolidation
+        size_t consolidated = episodic_memory->consolidateMemory();
+        
+        TS_ASSERT(consolidated > 0);
+        TS_ASSERT(episodic_memory->getEpisodeCount() < 3);
+        
+        logger().info("EpisodicMemoryUTest: Memory consolidation test passed");
+    }
+
+    void testConfigurationMethods()
+    {
+        // Test configuration setters
+        episodic_memory->setMaxEpisodes(500);
+        episodic_memory->setConsolidationThreshold(0.9);
+        episodic_memory->enablePatternDiscovery(false);
+        episodic_memory->enableTemporalReasoning(false);
+        episodic_memory->setTemporalResolution(std::chrono::milliseconds(200));
+        
+        // Configuration changes should not crash the system
+        std::vector<Handle> sequence = {action1};
+        std::vector<Handle> context = {context1};
+        
+        std::string episode_id = episodic_memory->recordEpisode("Config test", sequence, context);
+        TS_ASSERT(!episode_id.empty());
+        
+        logger().info("EpisodicMemoryUTest: Configuration methods test passed");
+    }
+
+    void testExportFunctionality()
+    {
+        // Record some episodes
+        std::vector<Handle> sequence = {action1, action2};
+        std::vector<Handle> context = {context1};
+        
+        episodic_memory->recordEpisode("Export test 1", sequence, context);
+        episodic_memory->recordEpisode("Export test 2", sequence, context);
+        
+        // Test JSON export
+        std::string json_export = episodic_memory->exportEpisodes("json");
+        TS_ASSERT(!json_export.empty());
+        TS_ASSERT(json_export.find("episodes") != std::string::npos);
+        TS_ASSERT(json_export.find("Export test 1") != std::string::npos);
+        
+        // Test unsupported format
+        std::string unsupported = episodic_memory->exportEpisodes("xml");
+        TS_ASSERT(unsupported.find("Unsupported") != std::string::npos);
+        
+        logger().info("EpisodicMemoryUTest: Export functionality test passed");
+    }
+
+    void testAtomSpaceIntegration()
+    {
+        // Record an episode and verify AtomSpace integration
+        std::vector<Handle> sequence = {action1, action2, action3};
+        std::vector<Handle> context = {context1, context2};
+        
+        size_t initial_size = atomspace->get_size();
+        
+        std::string episode_id = episodic_memory->recordEpisode(
+            "AtomSpace integration test",
+            sequence,
+            context
+        );
+        
+        TS_ASSERT(!episode_id.empty());
+        
+        // AtomSpace should have grown
+        size_t final_size = atomspace->get_size();
+        TS_ASSERT(final_size > initial_size);
+        
+        // Check for expected atom types
+        Handle memory_base = episodic_memory->getEpisodicMemoryBase();
+        TS_ASSERT(memory_base != Handle::UNDEFINED);
+        TS_ASSERT(memory_base->get_type() == CONCEPT_NODE);
+        
+        logger().info("EpisodicMemoryUTest: AtomSpace integration test passed");
+    }
+
+    void testErrorHandling()
+    {
+        // Test with null AtomSpace (should be caught in constructor)
+        bool exception_thrown = false;
+        try {
+            AtomSpacePtr null_atomspace;
+            EpisodicMemory bad_memory(null_atomspace);
+        } catch (const std::exception& e) {
+            exception_thrown = true;
+        }
+        TS_ASSERT(exception_thrown);
+        
+        // Test with invalid handles
+        std::vector<Handle> invalid_sequence = {Handle::UNDEFINED};
+        std::vector<Handle> context = {context1};
+        
+        std::string episode_id = episodic_memory->recordEpisode(
+            "Invalid sequence test",
+            invalid_sequence,
+            context
+        );
+        
+        // Should still work but handle gracefully
+        TS_ASSERT(!episode_id.empty());
+        
+        logger().info("EpisodicMemoryUTest: Error handling test passed");
+    }
+
+    void testPerformanceBasics()
+    {
+        // Test performance with moderate number of episodes
+        auto start_time = std::chrono::high_resolution_clock::now();
+        
+        std::vector<Handle> sequence = {action1, action2, action3};
+        std::vector<Handle> context = {context1, context2};
+        
+        // Record 100 episodes
+        for (int i = 0; i < 100; ++i) {
+            episodic_memory->recordEpisode(
+                "Performance test " + std::to_string(i),
+                sequence,
+                context
+            );
+        }
+        
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+        
+        TS_ASSERT_EQUALS(episodic_memory->getEpisodeCount(), 100);
+        TS_ASSERT(duration.count() < 5000); // Should complete in under 5 seconds
+        
+        // Test retrieval performance
+        auto retrieval_start = std::chrono::high_resolution_clock::now();
+        
+        EpisodicMemory::EpisodeContext query_context;
+        query_context.environmental_state = {context1};
+        query_context.query_time = std::chrono::system_clock::now();
+        
+        auto similar_episodes = episodic_memory->getSimilarEpisodes(query_context, 10);
+        
+        auto retrieval_end = std::chrono::high_resolution_clock::now();
+        auto retrieval_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            retrieval_end - retrieval_start);
+        
+        TS_ASSERT(similar_episodes.size() > 0);
+        TS_ASSERT(retrieval_duration.count() < 1000); // Should retrieve in under 1 second
+        
+        logger().info("EpisodicMemoryUTest: Performance basics test passed");
+    }
+};

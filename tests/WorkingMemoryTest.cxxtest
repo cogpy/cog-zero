@@ -1,0 +1,439 @@
+/*
+ * tests/WorkingMemoryTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for WorkingMemory implementation
+ * Testing AZ-MEM-002: Create WorkingMemory management
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/base/Link.h>
+#include <opencog/atoms/atom_types/types.h>
+#include <opencog/util/Logger.h>
+
+#include "opencog/agentzero/WorkingMemory.h"
+
+using namespace opencog;
+using namespace opencog::agentzero;
+
+class WorkingMemoryTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr atomspace;
+    std::unique_ptr<WorkingMemory> working_memory;
+
+public:
+    void setUp()
+    {
+        // Create fresh AtomSpace for each test
+        atomspace = std::make_shared<AtomSpace>();
+        
+        // Create WorkingMemory with test configuration
+        working_memory = std::make_unique<WorkingMemory>(
+            atomspace, 
+            100,    // max_capacity
+            0.1,    // importance_threshold
+            std::chrono::seconds(300)  // retention_time (5 minutes)
+        );
+        
+        // Set logger to test level
+        logger().set_level(Logger::DEBUG);
+        logger().set_print_to_stdout_flag(true);
+    }
+
+    void tearDown()
+    {
+        working_memory.reset();
+        atomspace.reset();
+    }
+
+    // ===================================================================
+    // Basic functionality tests
+    // ===================================================================
+
+    void test_construction()
+    {
+        TS_ASSERT(working_memory != nullptr);
+        TS_ASSERT_EQUALS(working_memory->getMaxCapacity(), 100);
+        TS_ASSERT_EQUALS(working_memory->getImportanceThreshold(), 0.1);
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 0);
+        TS_ASSERT(!working_memory->isAtCapacity());
+    }
+
+    void test_add_and_retrieve_items()
+    {
+        // Create test atoms
+        Handle concept1 = atomspace->add_node(CONCEPT_NODE, "TestConcept1");
+        Handle concept2 = atomspace->add_node(CONCEPT_NODE, "TestConcept2");
+        
+        // Add items to working memory
+        TS_ASSERT(working_memory->addItem(concept1, 0.8, "test_context"));
+        TS_ASSERT(working_memory->addItem(concept2, 0.6));
+        
+        // Verify items can be retrieved
+        TS_ASSERT(working_memory->hasItem(concept1));
+        TS_ASSERT(working_memory->hasItem(concept2));
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 2);
+        
+        // Get memory items
+        auto item1 = working_memory->getItem(concept1);
+        auto item2 = working_memory->getItem(concept2);
+        
+        TS_ASSERT(item1 != nullptr);
+        TS_ASSERT(item2 != nullptr);
+        TS_ASSERT_EQUALS(item1->atom, concept1);
+        TS_ASSERT_EQUALS(item2->atom, concept2);
+        TS_ASSERT_EQUALS(item1->importance, 0.8);
+        TS_ASSERT_EQUALS(item2->importance, 0.6);
+        TS_ASSERT_EQUALS(item1->context, "test_context");
+        TS_ASSERT_EQUALS(item2->context, "default");  // Should use active context
+    }
+
+    void test_remove_items()
+    {
+        Handle concept = atomspace->add_node(CONCEPT_NODE, "TestRemove");
+        
+        // Add and then remove
+        TS_ASSERT(working_memory->addItem(concept, 0.5));
+        TS_ASSERT(working_memory->hasItem(concept));
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 1);
+        
+        TS_ASSERT(working_memory->removeItem(concept));
+        TS_ASSERT(!working_memory->hasItem(concept));
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 0);
+        
+        // Removing non-existent item should return false
+        TS_ASSERT(!working_memory->removeItem(concept));
+    }
+
+    void test_update_importance()
+    {
+        Handle concept = atomspace->add_node(CONCEPT_NODE, "TestUpdate");
+        
+        // Add item
+        TS_ASSERT(working_memory->addItem(concept, 0.3));
+        auto item = working_memory->getItem(concept);
+        TS_ASSERT_EQUALS(item->importance, 0.3);
+        
+        // Update importance
+        TS_ASSERT(working_memory->updateImportance(concept, 0.9));
+        item = working_memory->getItem(concept);
+        TS_ASSERT_EQUALS(item->importance, 0.9);
+        
+        // Update non-existent item should return false
+        Handle nonexistent = atomspace->add_node(CONCEPT_NODE, "NonExistent");
+        TS_ASSERT(!working_memory->updateImportance(nonexistent, 0.5));
+    }
+
+    void test_access_items()
+    {
+        Handle concept = atomspace->add_node(CONCEPT_NODE, "TestAccess");
+        
+        // Add item
+        TS_ASSERT(working_memory->addItem(concept, 0.5));
+        auto item1 = working_memory->getItem(concept);
+        size_t initial_access_count = item1->access_count;
+        
+        // Access item
+        auto item2 = working_memory->accessItem(concept);
+        TS_ASSERT(item2 != nullptr);
+        TS_ASSERT_EQUALS(item2->access_count, initial_access_count + 1);
+        
+        // Access non-existent item should return nullptr
+        Handle nonexistent = atomspace->add_node(CONCEPT_NODE, "NonExistent");
+        TS_ASSERT(working_memory->accessItem(nonexistent) == nullptr);
+    }
+
+    // ===================================================================
+    // Context management tests
+    // ===================================================================
+
+    void test_context_operations()
+    {
+        // Create test atoms
+        Handle concept1 = atomspace->add_node(CONCEPT_NODE, "Context1");
+        Handle concept2 = atomspace->add_node(CONCEPT_NODE, "Context2");
+        Handle concept3 = atomspace->add_node(CONCEPT_NODE, "Context3");
+        
+        // Add items with different contexts
+        working_memory->addItem(concept1, 0.7, "context_a");
+        working_memory->addItem(concept2, 0.6, "context_a");
+        working_memory->addItem(concept3, 0.5, "context_b");
+        
+        // Test context retrieval
+        auto items_a = working_memory->getItemsByContext("context_a");
+        auto items_b = working_memory->getItemsByContext("context_b");
+        auto items_empty = working_memory->getItemsByContext("nonexistent");
+        
+        TS_ASSERT_EQUALS(items_a.size(), 2);
+        TS_ASSERT_EQUALS(items_b.size(), 1);
+        TS_ASSERT_EQUALS(items_empty.size(), 0);
+        
+        // Test active context
+        TS_ASSERT_EQUALS(working_memory->getActiveContext(), "default");
+        working_memory->setActiveContext("new_context");
+        TS_ASSERT_EQUALS(working_memory->getActiveContext(), "new_context");
+        
+        // Test context clearing
+        size_t cleared_count = working_memory->clearContext("context_a");
+        TS_ASSERT_EQUALS(cleared_count, 2);
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 1);
+        TS_ASSERT(working_memory->hasItem(concept3));  // Should still have context_b item
+    }
+
+    // ===================================================================
+    // Importance and capacity tests
+    // ===================================================================
+
+    void test_importance_based_operations()
+    {
+        // Add items with different importance values
+        Handle high_imp = atomspace->add_node(CONCEPT_NODE, "HighImportance");
+        Handle med_imp = atomspace->add_node(CONCEPT_NODE, "MediumImportance");
+        Handle low_imp = atomspace->add_node(CONCEPT_NODE, "LowImportance");
+        
+        working_memory->addItem(high_imp, 0.9);
+        working_memory->addItem(med_imp, 0.5);
+        working_memory->addItem(low_imp, 0.2);
+        
+        // Test important items retrieval
+        auto important_items = working_memory->getImportantItems(0.4);
+        TS_ASSERT_EQUALS(important_items.size(), 2);  // high and medium
+        
+        // Test most important items
+        auto most_important = working_memory->getMostImportantItems(2);
+        TS_ASSERT_EQUALS(most_important.size(), 2);
+        TS_ASSERT(most_important[0]->importance >= most_important[1]->importance);
+        
+        // Test least important items
+        auto least_important = working_memory->getLeastImportantItems(2);
+        TS_ASSERT_EQUALS(least_important.size(), 2);
+        TS_ASSERT(least_important[0]->importance <= least_important[1]->importance);
+    }
+
+    void test_capacity_management()
+    {
+        // Set small capacity for testing
+        working_memory->setMaxCapacity(3);
+        TS_ASSERT_EQUALS(working_memory->getMaxCapacity(), 3);
+        
+        // Add items up to capacity
+        Handle concept1 = atomspace->add_node(CONCEPT_NODE, "Cap1");
+        Handle concept2 = atomspace->add_node(CONCEPT_NODE, "Cap2");
+        Handle concept3 = atomspace->add_node(CONCEPT_NODE, "Cap3");
+        
+        working_memory->addItem(concept1, 0.3);
+        working_memory->addItem(concept2, 0.6);
+        working_memory->addItem(concept3, 0.9);
+        
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 3);
+        TS_ASSERT(working_memory->isAtCapacity());
+        
+        // Adding another item should trigger removal of least important
+        Handle concept4 = atomspace->add_node(CONCEPT_NODE, "Cap4");
+        working_memory->addItem(concept4, 0.8);
+        
+        // Should still have 3 items, with lowest importance item removed
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 3);
+        TS_ASSERT(!working_memory->hasItem(concept1));  // Lowest importance should be removed
+        TS_ASSERT(working_memory->hasItem(concept4));   // New item should be added
+    }
+
+    void test_importance_threshold()
+    {
+        working_memory->setImportanceThreshold(0.5);
+        TS_ASSERT_EQUALS(working_memory->getImportanceThreshold(), 0.5);
+        
+        // Add items above and below threshold
+        Handle high_item = atomspace->add_node(CONCEPT_NODE, "HighItem");
+        Handle low_item = atomspace->add_node(CONCEPT_NODE, "LowItem");
+        
+        working_memory->addItem(high_item, 0.8);
+        working_memory->addItem(low_item, 0.2);
+        
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 2);
+        
+        // Run cleanup should remove items below threshold
+        working_memory->runCleanup(true);
+        
+        TS_ASSERT(working_memory->hasItem(high_item));
+        TS_ASSERT(!working_memory->hasItem(low_item));
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 1);
+    }
+
+    // ===================================================================
+    // Memory management tests
+    // ===================================================================
+
+    void test_cleanup_operations()
+    {
+        // Add some items
+        Handle concept1 = atomspace->add_node(CONCEPT_NODE, "Cleanup1");
+        Handle concept2 = atomspace->add_node(CONCEPT_NODE, "Cleanup2");
+        
+        working_memory->addItem(concept1, 0.8);
+        working_memory->addItem(concept2, 0.05);  // Below default threshold
+        
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 2);
+        
+        // Run cleanup
+        size_t removed = working_memory->runCleanup(true);
+        TS_ASSERT(removed > 0);
+        
+        // Low importance item should be removed
+        TS_ASSERT(working_memory->hasItem(concept1));
+        TS_ASSERT(!working_memory->hasItem(concept2));
+    }
+
+    void test_clear_all()
+    {
+        // Add several items
+        for (int i = 0; i < 5; ++i) {
+            Handle concept = atomspace->add_node(CONCEPT_NODE, "Clear" + std::to_string(i));
+            working_memory->addItem(concept, 0.5 + i * 0.1);
+        }
+        
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 5);
+        
+        // Clear all
+        working_memory->clear();
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 0);
+    }
+
+    // ===================================================================
+    // Performance and statistics tests
+    // ===================================================================
+
+    void test_performance_statistics()
+    {
+        Handle concept = atomspace->add_node(CONCEPT_NODE, "PerfTest");
+        
+        // Add and access items to generate statistics
+        working_memory->addItem(concept, 0.7);
+        working_memory->getItem(concept);
+        working_memory->accessItem(concept);
+        
+        // Get performance stats
+        auto stats = working_memory->getPerformanceStats();
+        
+        TS_ASSERT(stats.find("hit_rate") != stats.end());
+        TS_ASSERT(stats.find("current_size") != stats.end());
+        TS_ASSERT(stats.find("total_accesses") != stats.end());
+        TS_ASSERT(stats["current_size"] == 1);
+        TS_ASSERT(stats["hit_rate"] > 0);
+        
+        // Test memory usage
+        auto usage = working_memory->getMemoryUsage();
+        TS_ASSERT(usage.find("memory_buffer_size") != usage.end());
+        TS_ASSERT(usage["memory_buffer_size"] == 1);
+    }
+
+    void test_hit_rate_calculation()
+    {
+        Handle concept1 = atomspace->add_node(CONCEPT_NODE, "Hit1");
+        Handle concept2 = atomspace->add_node(CONCEPT_NODE, "Hit2");
+        Handle nonexistent = atomspace->add_node(CONCEPT_NODE, "NonExistent");
+        
+        working_memory->addItem(concept1, 0.5);
+        working_memory->addItem(concept2, 0.5);
+        
+        // Reset counters for clean testing
+        working_memory->resetPerformanceCounters();
+        
+        // Perform successful and failed accesses
+        working_memory->getItem(concept1);      // Hit
+        working_memory->getItem(concept2);      // Hit
+        working_memory->getItem(nonexistent);  // Miss
+        
+        double hit_rate = working_memory->getHitRate();
+        TS_ASSERT_DELTA(hit_rate, 2.0/3.0, 0.01);  // 2 hits out of 3 accesses
+    }
+
+    // ===================================================================
+    // Validation and diagnostic tests
+    // ===================================================================
+
+    void test_memory_consistency()
+    {
+        // Add several items
+        Handle concept1 = atomspace->add_node(CONCEPT_NODE, "Consistency1");
+        Handle concept2 = atomspace->add_node(CONCEPT_NODE, "Consistency2");
+        
+        working_memory->addItem(concept1, 0.7);
+        working_memory->addItem(concept2, 0.5);
+        
+        // Validate consistency
+        TS_ASSERT(working_memory->validateMemoryConsistency());
+        
+        // Test item information
+        std::string info = working_memory->getItemInfo(concept1);
+        TS_ASSERT(!info.empty());
+        TS_ASSERT(info.find("Importance: 0.700") != std::string::npos);
+    }
+
+    void test_atomspace_integration()
+    {
+        Handle concept = atomspace->add_node(CONCEPT_NODE, "AtomSpaceTest");
+        working_memory->addItem(concept, 0.8);
+        
+        // Test AtomSpace representation creation
+        working_memory->createAtomSpaceRepresentation();
+        
+        // Verify working memory root exists
+        Handle root = working_memory->getWorkingMemoryRoot();
+        TS_ASSERT(root != Handle::UNDEFINED);
+        TS_ASSERT(atomspace->is_valid_handle(root));
+    }
+
+    // ===================================================================
+    // Edge cases and error handling tests
+    // ===================================================================
+
+    void test_invalid_operations()
+    {
+        // Test operations with invalid handles
+        Handle invalid_handle;
+        
+        TS_ASSERT(!working_memory->addItem(invalid_handle, 0.5));
+        TS_ASSERT(!working_memory->hasItem(invalid_handle));
+        TS_ASSERT(!working_memory->removeItem(invalid_handle));
+        TS_ASSERT(!working_memory->updateImportance(invalid_handle, 0.5));
+        TS_ASSERT(working_memory->getItem(invalid_handle) == nullptr);
+        TS_ASSERT(working_memory->accessItem(invalid_handle) == nullptr);
+    }
+
+    void test_duplicate_additions()
+    {
+        Handle concept = atomspace->add_node(CONCEPT_NODE, "Duplicate");
+        
+        // Add same item multiple times
+        TS_ASSERT(working_memory->addItem(concept, 0.5));
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 1);
+        
+        // Adding again should update, not add new
+        TS_ASSERT(working_memory->addItem(concept, 0.8));
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 1);
+        
+        auto item = working_memory->getItem(concept);
+        TS_ASSERT_EQUALS(item->importance, 0.8);  // Should be updated value
+    }
+
+    void test_zero_capacity()
+    {
+        working_memory->setMaxCapacity(0);
+        TS_ASSERT_EQUALS(working_memory->getMaxCapacity(), 0);
+        
+        Handle concept = atomspace->add_node(CONCEPT_NODE, "ZeroCapacity");
+        
+        // Should still be able to add items (implementation detail)
+        working_memory->addItem(concept, 0.5);
+        
+        // But cleanup should remove everything
+        working_memory->runCleanup(true);
+        TS_ASSERT_EQUALS(working_memory->getCurrentSize(), 0);
+    }
+};

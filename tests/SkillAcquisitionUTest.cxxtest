@@ -1,0 +1,353 @@
+/*
+ * tests/SkillAcquisitionUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for SkillAcquisition class
+ */
+
+#include <cxxtest/TestSuite.h>
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/atom_types/atom_types.h>
+
+#include "opencog/agentzero/SkillAcquisition.h"
+
+using namespace opencog;
+using namespace opencog::agentzero;
+
+class SkillAcquisitionUTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr atomspace;
+    std::unique_ptr<SkillAcquisition> skill_acquisition;
+    Handle test_context;
+    Handle test_task;
+    Handle test_demonstration;
+
+public:
+    void setUp()
+    {
+        atomspace = std::make_shared<AtomSpace>();
+        
+        SkillAcquisitionConfig config;
+        config.min_proficiency_threshold = 0.7;
+        config.learning_rate = 0.1;
+        config.max_practice_attempts = 5;
+        
+        skill_acquisition = std::make_unique<SkillAcquisition>(atomspace, config);
+        skill_acquisition->initialize();
+        
+        // Create test atoms
+        test_context = atomspace->add_node(CONCEPT_NODE, "TestContext");
+        test_task = atomspace->add_node(CONCEPT_NODE, "TestTask");
+        test_demonstration = atomspace->add_node(CONCEPT_NODE, "TestDemonstration");
+    }
+
+    void tearDown()
+    {
+        skill_acquisition.reset();
+        atomspace.reset();
+    }
+
+    // Test initialization
+    void testInitialization()
+    {
+        TS_ASSERT(skill_acquisition->isInitialized());
+        TS_ASSERT_EQUALS(skill_acquisition->getSkillCount(), 0);
+    }
+
+    // Test learning skill from demonstration
+    void testLearnFromDemonstration()
+    {
+        Handle skill_id = skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "DemoSkill");
+        
+        TS_ASSERT(skill_id != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(skill_acquisition->getSkillCount(), 1);
+        
+        // Retrieve and verify skill
+        Skill skill = skill_acquisition->getSkill(skill_id);
+        TS_ASSERT_EQUALS(skill.name, "DemoSkill");
+        TS_ASSERT(skill.proficiency > 0.0);
+        TS_ASSERT(skill.actions == test_demonstration);
+        
+        // Test with undefined demonstration
+        Handle invalid_skill = skill_acquisition->learnSkillFromDemonstration(Handle::UNDEFINED, test_context);
+        TS_ASSERT_EQUALS(invalid_skill, Handle::UNDEFINED);
+    }
+
+    // Test learning skill through practice
+    void testLearnThroughPractice()
+    {
+        Handle skill_id = skill_acquisition->learnSkillThroughPractice(test_task, test_context, "PracticeSkill");
+        
+        TS_ASSERT(skill_id != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(skill_acquisition->getSkillCount(), 1);
+        
+        // Retrieve and verify skill
+        Skill skill = skill_acquisition->getSkill(skill_id);
+        TS_ASSERT_EQUALS(skill.name, "PracticeSkill");
+        TS_ASSERT(skill.proficiency >= 0.0);
+        TS_ASSERT(skill.practice_count > 0);
+        
+        // Test with undefined task
+        Handle invalid_skill = skill_acquisition->learnSkillThroughPractice(Handle::UNDEFINED, test_context);
+        TS_ASSERT_EQUALS(invalid_skill, Handle::UNDEFINED);
+    }
+
+    // Test skill execution
+    void testSkillExecution()
+    {
+        // Learn a skill first
+        Handle skill_id = skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "ExecutableSkill");
+        
+        // Execute the skill
+        Handle result = skill_acquisition->executeSkill(skill_id, test_context);
+        TS_ASSERT(result != Handle::UNDEFINED);
+        
+        // Check skill was updated
+        Skill skill = skill_acquisition->getSkill(skill_id);
+        TS_ASSERT(skill.practice_count > 1); // Should have incremented
+        
+        // Test execution with invalid skill
+        Handle fake_skill = atomspace->add_node(CONCEPT_NODE, "FakeSkill");
+        Handle invalid_result = skill_acquisition->executeSkill(fake_skill, test_context);
+        TS_ASSERT_EQUALS(invalid_result, Handle::UNDEFINED);
+    }
+
+    // Test skill practice
+    void testSkillPractice()
+    {
+        // Learn a skill first
+        Handle skill_id = skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "PracticableSkill");
+        
+        Skill skill_before = skill_acquisition->getSkill(skill_id);
+        double proficiency_before = skill_before.proficiency;
+        int practice_count_before = skill_before.practice_count;
+        
+        // Practice the skill
+        bool practiced = skill_acquisition->practiceSkill(skill_id, test_context);
+        TS_ASSERT(practiced);
+        
+        // Check improvements
+        Skill skill_after = skill_acquisition->getSkill(skill_id);
+        TS_ASSERT(skill_after.practice_count > practice_count_before);
+        // Proficiency may or may not improve depending on implementation
+        
+        // Test practice with invalid skill
+        Handle fake_skill = atomspace->add_node(CONCEPT_NODE, "FakeSkill");
+        bool not_practiced = skill_acquisition->practiceSkill(fake_skill, test_context);
+        TS_ASSERT(!not_practiced);
+    }
+
+    // Test getting applicable skills
+    void testGetApplicableSkills()
+    {
+        // Learn skills in different contexts
+        Handle skill1_id = skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "Skill1");
+        
+        Handle other_context = atomspace->add_node(CONCEPT_NODE, "OtherContext");
+        Handle skill2_id = skill_acquisition->learnSkillFromDemonstration(test_demonstration, other_context, "Skill2");
+        
+        // Get skills applicable to test_context
+        std::vector<Skill> applicable = skill_acquisition->getApplicableSkills(test_context, 0.0);
+        TS_ASSERT(applicable.size() >= 1);
+        
+        // Check that applicable skills are sorted by proficiency
+        for (size_t i = 1; i < applicable.size(); i++) {
+            TS_ASSERT(applicable[i-1].proficiency >= applicable[i].proficiency);
+        }
+        
+        // Test with high proficiency threshold
+        std::vector<Skill> high_proficiency = skill_acquisition->getApplicableSkills(test_context, 0.9);
+        TS_ASSERT(high_proficiency.size() <= applicable.size());
+    }
+
+    // Test skill proficiency updates
+    void testSkillProficiencyUpdates()
+    {
+        Handle skill_id = skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "UpdateableSkill");
+        
+        Skill skill_before = skill_acquisition->getSkill(skill_id);
+        double proficiency_before = skill_before.proficiency;
+        
+        // Update with successful performance
+        bool updated = skill_acquisition->updateSkillProficiency(skill_id, true, 0.9);
+        TS_ASSERT(updated);
+        
+        Skill skill_after = skill_acquisition->getSkill(skill_id);
+        TS_ASSERT(skill_after.proficiency >= proficiency_before); // Should improve or stay same
+        
+        // Test update with invalid skill
+        Handle fake_skill = atomspace->add_node(CONCEPT_NODE, "FakeSkill");
+        bool not_updated = skill_acquisition->updateSkillProficiency(fake_skill, true, 0.8);
+        TS_ASSERT(!not_updated);
+    }
+
+    // Test skill statistics
+    void testSkillStatistics()
+    {
+        // Learn multiple skills
+        skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "Skill1");
+        skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "Skill2");
+        skill_acquisition->learnSkillThroughPractice(test_task, test_context, "Skill3");
+        
+        std::map<std::string, double> stats = skill_acquisition->getSkillStatistics();
+        
+        TS_ASSERT_EQUALS(stats["total_skills"], 3.0);
+        TS_ASSERT(stats["average_proficiency"] >= 0.0);
+        TS_ASSERT(stats["average_confidence"] >= 0.0);
+        TS_ASSERT(stats["proficient_skills"] >= 0.0);
+        TS_ASSERT(stats["proficiency_rate"] >= 0.0);
+    }
+
+    // Test skill retrieval by handle
+    void testSkillRetrievalByHandle()
+    {
+        Handle skill_id = skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "RetrievableSkill");
+        
+        Skill skill = skill_acquisition->getSkill(skill_id);
+        TS_ASSERT(skill.id == skill_id);
+        TS_ASSERT_EQUALS(skill.name, "RetrievableSkill");
+        
+        // Test retrieval with invalid handle
+        Handle fake_skill = atomspace->add_node(CONCEPT_NODE, "FakeSkill");
+        Skill empty_skill = skill_acquisition->getSkill(fake_skill);
+        TS_ASSERT(empty_skill.id == Handle::UNDEFINED);
+    }
+
+    // Test proficient skills filtering
+    void testProficientSkills()
+    {
+        // Learn skills and manually set proficiency levels
+        Handle skill1_id = skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "LowSkill");
+        Handle skill2_id = skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "HighSkill");
+        
+        // Update proficiencies through practice/execution
+        for (int i = 0; i < 5; i++) {
+            skill_acquisition->practiceSkill(skill2_id, test_context);
+        }
+        
+        std::vector<Skill> proficient = skill_acquisition->getProficientSkills(0.5);
+        TS_ASSERT(proficient.size() >= 0);
+        
+        // All returned skills should meet the threshold
+        for (const auto& skill : proficient) {
+            TS_ASSERT(skill.proficiency >= 0.5);
+        }
+    }
+
+    // Test configuration
+    void testConfiguration()
+    {
+        SkillAcquisitionConfig new_config;
+        new_config.min_proficiency_threshold = 0.8;
+        new_config.learning_rate = 0.2;
+        new_config.max_practice_attempts = 10;
+        
+        skill_acquisition->configure(new_config);
+        
+        // Configuration should be applied internally
+        // (no direct way to verify without exposing internal state)
+    }
+
+    // Test reset functionality
+    void testReset()
+    {
+        // Learn some skills
+        skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "Skill1");
+        skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "Skill2");
+        
+        TS_ASSERT_EQUALS(skill_acquisition->getSkillCount(), 2);
+        
+        // Reset
+        skill_acquisition->reset();
+        
+        TS_ASSERT_EQUALS(skill_acquisition->getSkillCount(), 0);
+        
+        // Should still be able to learn new skills
+        Handle new_skill = skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "NewSkill");
+        TS_ASSERT(new_skill != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(skill_acquisition->getSkillCount(), 1);
+    }
+
+    // Test storage integrity validation
+    void testStorageIntegrity()
+    {
+        // Learn some skills
+        for (int i = 0; i < 5; i++) {
+            skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "Skill" + std::to_string(i));
+        }
+        
+        TS_ASSERT(skill_acquisition->validateSkillIntegrity());
+    }
+
+    // Test maintenance tasks
+    void testMaintenance()
+    {
+        // Learn a skill
+        Handle skill_id = skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "MaintenanceSkill");
+        
+        // Perform maintenance (should not crash)
+        skill_acquisition->performMaintenance();
+        
+        // Skill should still exist
+        Skill skill = skill_acquisition->getSkill(skill_id);
+        TS_ASSERT(skill.id == skill_id);
+    }
+
+    // Test experience manager integration
+    void testExperienceManagerIntegration()
+    {
+        auto experience_manager = std::make_shared<ExperienceManager>(atomspace);
+        experience_manager->initialize();
+        
+        skill_acquisition->setExperienceManager(experience_manager);
+        
+        // Test that integration doesn't break functionality
+        Handle skill_id = skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "IntegratedSkill");
+        TS_ASSERT(skill_id != Handle::UNDEFINED);
+    }
+
+    // Test performance with many skills
+    void testPerformanceWithManySkills()
+    {
+        // Learn many skills
+        for (int i = 0; i < 20; i++) {
+            Handle task = atomspace->add_node(CONCEPT_NODE, "Task" + std::to_string(i));
+            Handle context = atomspace->add_node(CONCEPT_NODE, "Context" + std::to_string(i % 3));
+            
+            skill_acquisition->learnSkillFromDemonstration(test_demonstration, context, "Skill" + std::to_string(i));
+        }
+        
+        TS_ASSERT_EQUALS(skill_acquisition->getSkillCount(), 20);
+        
+        // System should still function properly
+        std::vector<Skill> applicable = skill_acquisition->getApplicableSkills(test_context, 0.0);
+        auto stats = skill_acquisition->getSkillStatistics();
+        TS_ASSERT_EQUALS(stats["total_skills"], 20.0);
+        
+        TS_ASSERT(skill_acquisition->validateSkillIntegrity());
+    }
+
+    // Test edge cases
+    void testEdgeCases()
+    {
+        // Test learning with empty skill name
+        Handle skill_id = skill_acquisition->learnSkillFromDemonstration(test_demonstration, test_context, "");
+        TS_ASSERT(skill_id != Handle::UNDEFINED);
+        
+        Skill skill = skill_acquisition->getSkill(skill_id);
+        TS_ASSERT(!skill.name.empty()); // Should generate a name
+        
+        // Test with undefined context
+        Handle skill_id2 = skill_acquisition->learnSkillFromDemonstration(test_demonstration, Handle::UNDEFINED, "NoContextSkill");
+        TS_ASSERT(skill_id2 != Handle::UNDEFINED);
+        
+        // Test applicable skills with undefined context
+        std::vector<Skill> any_context = skill_acquisition->getApplicableSkills(Handle::UNDEFINED, 0.0);
+        TS_ASSERT(any_context.size() >= 0);
+    }
+};

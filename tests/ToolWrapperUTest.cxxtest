@@ -1,0 +1,435 @@
+/*
+ * tests/ToolWrapperUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for ToolWrapper implementation
+ * Tests unified interface for external tool integration
+ * Part of the AGENT-ZERO-GENESIS project - AZ-TOOL-002
+ */
+
+#include <memory>
+#include <string>
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/atom_types/types.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/util/Logger.h>
+
+#include <opencog/agentzero/tools/ToolWrapper.h>
+
+#include <cxxtest/TestSuite.h>
+
+using namespace opencog;
+using namespace opencog::agentzero::tools;
+
+class ToolWrapperUTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr atomspace;
+
+public:
+    ToolWrapperUTest()
+    {
+        logger().set_level(Logger::INFO);
+        logger().set_timestamp_flag(false);
+        logger().set_print_level_flag(false);
+    }
+
+    void setUp()
+    {
+        atomspace = createAtomSpace();
+    }
+
+    void tearDown()
+    {
+        atomspace = nullptr;
+    }
+
+    // ========================================================================
+    // ToolResult Tests
+    // ========================================================================
+
+    void test_ToolResultConstruction()
+    {
+        ToolResult result(ToolStatus::NOT_STARTED);
+        
+        TS_ASSERT_EQUALS(result.getStatus(), ToolStatus::NOT_STARTED);
+        TS_ASSERT_EQUALS(result.isSuccess(), false);
+        TS_ASSERT_EQUALS(result.isFailure(), false);
+        TS_ASSERT_EQUALS(result.getOutput(), "");
+        TS_ASSERT_EQUALS(result.getErrorMessage(), "");
+    }
+
+    void test_ToolResultStatusManagement()
+    {
+        ToolResult result;
+        
+        result.setStatus(ToolStatus::COMPLETED);
+        TS_ASSERT_EQUALS(result.getStatus(), ToolStatus::COMPLETED);
+        TS_ASSERT_EQUALS(result.isSuccess(), true);
+        TS_ASSERT_EQUALS(result.isFailure(), false);
+        
+        result.setStatus(ToolStatus::FAILED);
+        TS_ASSERT_EQUALS(result.getStatus(), ToolStatus::FAILED);
+        TS_ASSERT_EQUALS(result.isSuccess(), false);
+        TS_ASSERT_EQUALS(result.isFailure(), true);
+    }
+
+    void test_ToolResultOutputManagement()
+    {
+        ToolResult result;
+        
+        result.setOutput("Test output");
+        TS_ASSERT_EQUALS(result.getOutput(), "Test output");
+        
+        result.setErrorMessage("Test error");
+        TS_ASSERT_EQUALS(result.getErrorMessage(), "Test error");
+    }
+
+    void test_ToolResultMetadata()
+    {
+        ToolResult result;
+        
+        result.setMetadata("key1", "value1");
+        result.setMetadata("key2", "value2");
+        
+        TS_ASSERT_EQUALS(result.getMetadata("key1"), "value1");
+        TS_ASSERT_EQUALS(result.getMetadata("key2"), "value2");
+        TS_ASSERT_EQUALS(result.getMetadata("nonexistent"), "");
+        
+        const auto& metadata = result.getAllMetadata();
+        TS_ASSERT_EQUALS(metadata.size(), 2);
+    }
+
+    void test_ToolResultAtomSpaceIntegration()
+    {
+        ToolResult result;
+        
+        Handle h1 = atomspace->add_node(CONCEPT_NODE, "TestNode1");
+        Handle h2 = atomspace->add_node(CONCEPT_NODE, "TestNode2");
+        
+        result.addAtomSpaceResult(h1);
+        result.addAtomSpaceResult(h2);
+        
+        const HandleSeq& results = result.getAtomSpaceResults();
+        TS_ASSERT_EQUALS(results.size(), 2);
+        TS_ASSERT_EQUALS(results[0], h1);
+        TS_ASSERT_EQUALS(results[1], h2);
+    }
+
+    void test_ToolResultSerialization()
+    {
+        ToolResult result(ToolStatus::COMPLETED);
+        result.setOutput("Test output");
+        result.setExecutionTime(123.45);
+        result.setMetadata("test_key", "test_value");
+        
+        std::string json = result.toJSON();
+        TS_ASSERT(json.find("COMPLETED") != std::string::npos);
+        TS_ASSERT(json.find("123.45") != std::string::npos);
+        TS_ASSERT(json.find("test_key") != std::string::npos);
+        
+        std::string str = result.toString();
+        TS_ASSERT(str.find("COMPLETED") != std::string::npos);
+        TS_ASSERT(str.find("123.45") != std::string::npos);
+    }
+
+    // ========================================================================
+    // ToolExecutionContext Tests
+    // ========================================================================
+
+    void test_ToolExecutionContextConstruction()
+    {
+        ToolExecutionContext context(atomspace);
+        
+        TS_ASSERT_EQUALS(context.getAtomSpace(), atomspace);
+        TS_ASSERT_EQUALS(context.getTimeout(), 30000.0); // Default timeout
+        TS_ASSERT_EQUALS(context.isAsyncExecution(), false);
+    }
+
+    void test_ToolExecutionContextParameters()
+    {
+        ToolExecutionContext context;
+        
+        context.setParameter("param1", "value1");
+        context.setParameter("param2", "value2");
+        
+        TS_ASSERT_EQUALS(context.hasParameter("param1"), true);
+        TS_ASSERT_EQUALS(context.hasParameter("param2"), true);
+        TS_ASSERT_EQUALS(context.hasParameter("param3"), false);
+        
+        TS_ASSERT_EQUALS(context.getParameter("param1"), "value1");
+        TS_ASSERT_EQUALS(context.getParameter("param2"), "value2");
+        TS_ASSERT_EQUALS(context.getParameter("param3"), "");
+    }
+
+    void test_ToolExecutionContextConfiguration()
+    {
+        ToolExecutionContext context;
+        
+        context.setConfig("config1", "value1");
+        TS_ASSERT_EQUALS(context.getConfig("config1"), "value1");
+        
+        context.setTimeout(5000.0);
+        TS_ASSERT_EQUALS(context.getTimeout(), 5000.0);
+        
+        context.setAsyncExecution(true);
+        TS_ASSERT_EQUALS(context.isAsyncExecution(), true);
+    }
+
+    void test_ToolExecutionContextInputAtoms()
+    {
+        ToolExecutionContext context(atomspace);
+        
+        Handle h1 = atomspace->add_node(CONCEPT_NODE, "Input1");
+        Handle h2 = atomspace->add_node(CONCEPT_NODE, "Input2");
+        
+        context.addInputAtom(h1);
+        context.addInputAtom(h2);
+        
+        const HandleSeq& inputs = context.getInputAtoms();
+        TS_ASSERT_EQUALS(inputs.size(), 2);
+        TS_ASSERT_EQUALS(inputs[0], h1);
+        TS_ASSERT_EQUALS(inputs[1], h2);
+    }
+
+    // ========================================================================
+    // ToolWrapper Tests
+    // ========================================================================
+
+    void test_ToolWrapperConstruction()
+    {
+        ToolWrapper tool("test_tool", ToolType::CUSTOM, atomspace);
+        
+        TS_ASSERT_EQUALS(tool.getToolName(), "test_tool");
+        TS_ASSERT_EQUALS(tool.getToolType(), ToolType::CUSTOM);
+        TS_ASSERT_EQUALS(tool.getAtomSpace(), atomspace);
+        TS_ASSERT(tool.getToolId().find("test_tool") != std::string::npos);
+        TS_ASSERT_DIFFERS(tool.getToolAtom(), Handle::UNDEFINED);
+    }
+
+    void test_ToolWrapperWithoutAtomSpace()
+    {
+        ToolWrapper tool("test_tool", ToolType::CUSTOM);
+        
+        TS_ASSERT_EQUALS(tool.getToolName(), "test_tool");
+        TS_ASSERT_EQUALS(tool.getAtomSpace(), nullptr);
+        TS_ASSERT_EQUALS(tool.getToolAtom(), Handle::UNDEFINED);
+    }
+
+    void test_ToolWrapperConfiguration()
+    {
+        ToolWrapper tool("test_tool", ToolType::CUSTOM);
+        
+        tool.setDescription("Test tool description");
+        TS_ASSERT_EQUALS(tool.getDescription(), "Test tool description");
+        
+        tool.setToolEndpoint("http://localhost:5000/api");
+        TS_ASSERT_EQUALS(tool.getToolEndpoint(), "http://localhost:5000/api");
+        
+        tool.setToolConfig("config1", "value1");
+        TS_ASSERT_EQUALS(tool.getToolConfig("config1"), "value1");
+    }
+
+    void test_ToolWrapperRequiredParameters()
+    {
+        ToolWrapper tool("test_tool", ToolType::CUSTOM);
+        tool.addRequiredParameter("required_param");
+        
+        ToolExecutionContext context;
+        
+        // Should fail without required parameter
+        ToolResult result1 = tool.execute(context);
+        TS_ASSERT_EQUALS(result1.getStatus(), ToolStatus::FAILED);
+        TS_ASSERT(result1.getErrorMessage().find("validation failed") != std::string::npos);
+        
+        // Should succeed with required parameter
+        context.setParameter("required_param", "value");
+        
+        // Set custom executor to make it succeed
+        tool.setCustomExecutor([](const ToolExecutionContext& ctx) {
+            ToolResult res(ToolStatus::COMPLETED);
+            res.setOutput("Success");
+            return res;
+        });
+        
+        ToolResult result2 = tool.execute(context);
+        TS_ASSERT_EQUALS(result2.getStatus(), ToolStatus::COMPLETED);
+    }
+
+    void test_ToolWrapperCustomExecutor()
+    {
+        ToolWrapper tool("test_tool", ToolType::CUSTOM);
+        
+        // Set custom executor
+        tool.setCustomExecutor([](const ToolExecutionContext& context) {
+            ToolResult result(ToolStatus::COMPLETED);
+            std::string param = context.getParameter("test_param");
+            result.setOutput("Executed with param: " + param);
+            return result;
+        });
+        
+        ToolExecutionContext context;
+        context.setParameter("test_param", "test_value");
+        
+        ToolResult result = tool.execute(context);
+        
+        TS_ASSERT_EQUALS(result.getStatus(), ToolStatus::COMPLETED);
+        TS_ASSERT_EQUALS(result.getOutput(), "Executed with param: test_value");
+    }
+
+    void test_ToolWrapperAtomSpaceQueryExecution()
+    {
+        ToolWrapper tool("query_tool", ToolType::ATOMSPACE_QUERY, atomspace);
+        
+        // Create some test atoms
+        Handle h1 = atomspace->add_node(CONCEPT_NODE, "QueryTest1");
+        Handle h2 = atomspace->add_node(CONCEPT_NODE, "QueryTest2");
+        
+        ToolExecutionContext context(atomspace);
+        context.addInputAtom(h1);
+        context.addInputAtom(h2);
+        
+        ToolResult result = tool.execute(context);
+        
+        TS_ASSERT_EQUALS(result.getStatus(), ToolStatus::COMPLETED);
+        TS_ASSERT_EQUALS(result.getAtomSpaceResults().size(), 2);
+    }
+
+    void test_ToolWrapperStatistics()
+    {
+        ToolWrapper tool("stats_tool", ToolType::CUSTOM);
+        
+        // Initial state
+        TS_ASSERT_EQUALS(tool.getExecutionCount(), 0);
+        TS_ASSERT_EQUALS(tool.getSuccessRate(), 0.0);
+        TS_ASSERT_EQUALS(tool.getAverageExecutionTime(), 0.0);
+        
+        // Set up successful executor
+        tool.setCustomExecutor([](const ToolExecutionContext& context) {
+            ToolResult result(ToolStatus::COMPLETED);
+            result.setOutput("Success");
+            return result;
+        });
+        
+        // Execute multiple times
+        ToolExecutionContext context;
+        for (int i = 0; i < 5; i++) {
+            tool.execute(context);
+        }
+        
+        TS_ASSERT_EQUALS(tool.getExecutionCount(), 5);
+        TS_ASSERT_EQUALS(tool.getSuccessRate(), 1.0);
+        TS_ASSERT(tool.getAverageExecutionTime() > 0.0);
+        
+        // Test statistics JSON
+        std::string stats = tool.getStatistics();
+        TS_ASSERT(stats.find("execution_count") != std::string::npos);
+        TS_ASSERT(stats.find("success_rate") != std::string::npos);
+    }
+
+    void test_ToolWrapperStatisticsReset()
+    {
+        ToolWrapper tool("reset_tool", ToolType::CUSTOM);
+        
+        tool.setCustomExecutor([](const ToolExecutionContext& context) {
+            return ToolResult(ToolStatus::COMPLETED);
+        });
+        
+        ToolExecutionContext context;
+        tool.execute(context);
+        
+        TS_ASSERT_EQUALS(tool.getExecutionCount(), 1);
+        
+        tool.resetStatistics();
+        
+        TS_ASSERT_EQUALS(tool.getExecutionCount(), 0);
+        TS_ASSERT_EQUALS(tool.getSuccessRate(), 0.0);
+    }
+
+    void test_ToolWrapperAtomSpaceIntegration()
+    {
+        ToolWrapper tool("atomspace_tool", ToolType::CUSTOM, atomspace);
+        
+        // Tool should create its representation in AtomSpace
+        Handle tool_atom = tool.getToolAtom();
+        TS_ASSERT_DIFFERS(tool_atom, Handle::UNDEFINED);
+        
+        // Tool atom should exist in atomspace
+        TS_ASSERT(atomspace->get_atom(tool_atom));
+        
+        // Execute tool to create execution record
+        tool.setCustomExecutor([](const ToolExecutionContext& context) {
+            return ToolResult(ToolStatus::COMPLETED);
+        });
+        
+        ToolExecutionContext context(atomspace);
+        tool.execute(context);
+        
+        // Execution should be recorded in AtomSpace
+        TS_ASSERT(atomspace->get_size() > 1);
+    }
+
+    void test_ToolWrapperErrorHandling()
+    {
+        ToolWrapper tool("error_tool", ToolType::CUSTOM);
+        
+        // Test with throwing executor
+        tool.setCustomExecutor([](const ToolExecutionContext& context) -> ToolResult {
+            throw std::runtime_error("Test exception");
+        });
+        
+        ToolExecutionContext context;
+        ToolResult result = tool.execute(context);
+        
+        TS_ASSERT_EQUALS(result.getStatus(), ToolStatus::FAILED);
+        TS_ASSERT(result.getErrorMessage().find("exception") != std::string::npos);
+    }
+
+    void test_ToolWrapperMultipleToolTypes()
+    {
+        ToolWrapper rest_tool("rest_tool", ToolType::EXTERNAL_REST_API);
+        ToolWrapper ros_tool("ros_tool", ToolType::ROS_BEHAVIOR);
+        ToolWrapper python_tool("python_tool", ToolType::PYTHON_SCRIPT);
+        ToolWrapper shell_tool("shell_tool", ToolType::SHELL_COMMAND);
+        
+        TS_ASSERT_EQUALS(rest_tool.getToolType(), ToolType::EXTERNAL_REST_API);
+        TS_ASSERT_EQUALS(ros_tool.getToolType(), ToolType::ROS_BEHAVIOR);
+        TS_ASSERT_EQUALS(python_tool.getToolType(), ToolType::PYTHON_SCRIPT);
+        TS_ASSERT_EQUALS(shell_tool.getToolType(), ToolType::SHELL_COMMAND);
+    }
+
+    void test_ToolWrapperExecutionTiming()
+    {
+        ToolWrapper tool("timing_tool", ToolType::CUSTOM);
+        
+        tool.setCustomExecutor([](const ToolExecutionContext& context) {
+            // Simulate some work
+            return ToolResult(ToolStatus::COMPLETED);
+        });
+        
+        ToolExecutionContext context;
+        ToolResult result = tool.execute(context);
+        
+        // Execution time should be recorded
+        TS_ASSERT(result.getExecutionTime() >= 0.0);
+        TS_ASSERT(result.getExecutionTime() < 1000.0); // Should be less than 1 second
+    }
+
+    void test_ToolWrapperSetAtomSpace()
+    {
+        ToolWrapper tool("atomspace_set_tool", ToolType::CUSTOM);
+        
+        // Initially no atomspace
+        TS_ASSERT_EQUALS(tool.getAtomSpace(), nullptr);
+        TS_ASSERT_EQUALS(tool.getToolAtom(), Handle::UNDEFINED);
+        
+        // Set atomspace
+        tool.setAtomSpace(atomspace);
+        
+        TS_ASSERT_EQUALS(tool.getAtomSpace(), atomspace);
+        TS_ASSERT_DIFFERS(tool.getToolAtom(), Handle::UNDEFINED);
+    }
+};

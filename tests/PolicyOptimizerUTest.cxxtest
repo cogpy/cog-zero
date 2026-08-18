@@ -1,0 +1,531 @@
+/*
+ * tests/PolicyOptimizerUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for PolicyOptimizer class
+ */
+
+#include <cxxtest/TestSuite.h>
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/atom_types/atom_types.h>
+
+#include "opencog/agentzero/PolicyOptimizer.h"
+
+using namespace opencog;
+using namespace opencog::agentzero;
+/**
+ * PolicyOptimizerUTest.cxxtest - Unit tests for PolicyOptimizer
+ * 
+ * Part of AZ-LEARN-003: MOSES Policy Optimization Integration
+ * Copyright (C) 2024 OpenCog Foundation
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <agentzero/learning/PolicyOptimizer.h>
+#include <agentzero/learning/LearningUtils.h>
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/util/Logger.h>
+
+using namespace opencog;
+using namespace opencog::agentzero::learning;
+
+// Simple fitness function for testing
+class TestFitnessFunction : public PolicyFitnessFunction {
+public:
+    double evaluate(const opencog::combo::combo_tree& program,
+                   const std::map<std::string, Handle>& context = {}) override {
+        // Simple fitness: return a value based on program complexity
+        // Lower complexity = higher fitness for testing
+        return 1.0 / (1.0 + program.size());
+    }
+    
+    std::string getName() const override {
+        return "TestFitnessFunction";
+    }
+    
+    std::vector<std::string> getInputFeatures() const override {
+        return {"input1", "input2"};
+    }
+};
+
+class PolicyOptimizerUTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr atomspace;
+    std::unique_ptr<PolicyOptimizer> policy_optimizer;
+    Handle test_context;
+    Handle test_objective;
+    Handle test_conditions;
+    Handle test_actions;
+
+public:
+    void setUp()
+    {
+        atomspace = std::make_shared<AtomSpace>();
+        
+        PolicyOptimizerConfig config;
+        config.population_size = 10;
+        config.max_generations = 5;
+        config.mutation_rate = 0.1;
+        config.crossover_rate = 0.7;
+        
+        policy_optimizer = std::make_unique<PolicyOptimizer>(atomspace, config);
+        policy_optimizer->initialize();
+        
+        // Create test atoms
+        test_context = atomspace->add_node(CONCEPT_NODE, "TestContext");
+        test_objective = atomspace->add_node(CONCEPT_NODE, "TestObjective");
+        test_conditions = atomspace->add_node(CONCEPT_NODE, "TestConditions");
+        test_actions = atomspace->add_node(CONCEPT_NODE, "TestActions");
+    }
+
+    void tearDown()
+    {
+        policy_optimizer.reset();
+        atomspace.reset();
+    }
+
+    // Test initialization
+    void testInitialization()
+    {
+        TS_ASSERT(policy_optimizer->isInitialized());
+        TS_ASSERT_EQUALS(policy_optimizer->getPolicyCount(), 0);
+        TS_ASSERT_EQUALS(policy_optimizer->getCurrentGeneration(), 0);
+    }
+
+    // Test policy creation
+    void testPolicyCreation()
+    {
+        Handle policy_id = policy_optimizer->createPolicy("TestPolicy", test_conditions, test_actions);
+        
+        TS_ASSERT(policy_id != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(policy_optimizer->getPolicyCount(), 1);
+        
+        // Retrieve and verify policy
+        Policy policy = policy_optimizer->getPolicy(policy_id);
+        TS_ASSERT_EQUALS(policy.name, "TestPolicy");
+        TS_ASSERT(policy.conditions == test_conditions);
+        TS_ASSERT(policy.actions == test_actions);
+        TS_ASSERT_EQUALS(policy.fitness, 0.0);
+        TS_ASSERT_EQUALS(policy.evaluation_count, 0);
+    }
+
+    // Test policy optimization
+    void testPolicyOptimization()
+    {
+        // Create some initial policies
+        policy_optimizer->createPolicy("Policy1", test_conditions, test_actions);
+        policy_optimizer->createPolicy("Policy2", test_conditions, test_actions);
+        
+        // Optimize policies
+        Handle best_policy = policy_optimizer->optimizePolicies(test_context, test_objective, 3);
+        
+        TS_ASSERT(best_policy != Handle::UNDEFINED);
+        TS_ASSERT(policy_optimizer->getCurrentGeneration() > 0);
+        
+        // Check that best policy has been evaluated
+        Policy best = policy_optimizer->getPolicy(best_policy);
+        TS_ASSERT(best.evaluation_count > 0);
+    }
+
+    // Test policy evolution
+    void testPolicyEvolution()
+    {
+        // Create initial policies
+        for (int i = 0; i < 5; i++) {
+            policy_optimizer->createPolicy("Policy" + std::to_string(i), test_conditions, test_actions);
+        }
+        
+        int initial_generation = policy_optimizer->getCurrentGeneration();
+        
+        // Evolve policies
+        Policy best_policy = policy_optimizer->evolvePolicies(3);
+        
+        TS_ASSERT(best_policy.id != Handle::UNDEFINED);
+        TS_ASSERT(policy_optimizer->getCurrentGeneration() > initial_generation);
+        
+        // Check fitness history
+        std::vector<double> history = policy_optimizer->getFitnessHistory();
+        TS_ASSERT(history.size() >= 3);
+    }
+
+    // Test policy evaluation
+    void testPolicyEvaluation()
+    {
+        Handle policy_id = policy_optimizer->createPolicy("EvaluablePolicy", test_conditions, test_actions);
+        
+        // Evaluate policy
+        double performance = policy_optimizer->evaluatePolicy(policy_id, test_context);
+        TS_ASSERT(performance >= 0.0 && performance <= 1.0);
+        
+        // Check that policy was updated
+        Policy policy = policy_optimizer->getPolicy(policy_id);
+        TS_ASSERT(policy.evaluation_count > 0);
+        TS_ASSERT_EQUALS(policy.fitness, performance);
+        
+        // Test evaluation with invalid policy
+        Handle fake_policy = atomspace->add_node(CONCEPT_NODE, "FakePolicy");
+        double invalid_performance = policy_optimizer->evaluatePolicy(fake_policy, test_context);
+        TS_ASSERT_EQUALS(invalid_performance, 0.0);
+    }
+
+    // Test getting best policies
+    void testGetBestPolicies()
+    {
+        // Create policies and give them different performances
+        Handle policy1 = policy_optimizer->createPolicy("LowPolicy", test_conditions, test_actions);
+        Handle policy2 = policy_optimizer->createPolicy("MediumPolicy", test_conditions, test_actions);
+        Handle policy3 = policy_optimizer->createPolicy("HighPolicy", test_conditions, test_actions);
+        
+        // Simulate evaluations with different performances
+        policy_optimizer->updatePolicyPerformance(policy1, 0.3, test_context);
+        policy_optimizer->updatePolicyPerformance(policy2, 0.6, test_context);
+        policy_optimizer->updatePolicyPerformance(policy3, 0.9, test_context);
+        
+        // Get best policies
+        std::vector<Policy> best = policy_optimizer->getBestPolicies(2, 1);
+        TS_ASSERT(best.size() <= 2);
+        
+        // Should be sorted by fitness (descending)
+        for (size_t i = 1; i < best.size(); i++) {
+            TS_ASSERT(best[i-1].fitness >= best[i].fitness);
+        }
+    }
+
+    // Test policy performance updates
+    void testPolicyPerformanceUpdates()
+    {
+        Handle policy_id = policy_optimizer->createPolicy("UpdateablePolicy", test_conditions, test_actions);
+        
+        Policy policy_before = policy_optimizer->getPolicy(policy_id);
+        int eval_count_before = policy_before.evaluation_count;
+        
+        // Update performance
+        bool updated = policy_optimizer->updatePolicyPerformance(policy_id, 0.8, test_context);
+        TS_ASSERT(updated);
+        
+        Policy policy_after = policy_optimizer->getPolicy(policy_id);
+        TS_ASSERT_EQUALS(policy_after.performance, 0.8);
+        TS_ASSERT(policy_after.evaluation_count > eval_count_before);
+        
+        // Test update with invalid policy
+        Handle fake_policy = atomspace->add_node(CONCEPT_NODE, "FakePolicy");
+        bool not_updated = policy_optimizer->updatePolicyPerformance(fake_policy, 0.7, test_context);
+        TS_ASSERT(!not_updated);
+    }
+
+    // Test optimization statistics
+    void testOptimizationStatistics()
+    {
+        // Create and evaluate some policies
+        for (int i = 0; i < 5; i++) {
+            Handle policy_id = policy_optimizer->createPolicy("StatPolicy" + std::to_string(i), test_conditions, test_actions);
+            policy_optimizer->evaluatePolicy(policy_id, test_context);
+        }
+        
+        std::map<std::string, double> stats = policy_optimizer->getOptimizationStatistics();
+        
+        TS_ASSERT_EQUALS(stats["total_policies"], 5.0);
+        TS_ASSERT(stats["average_fitness"] >= 0.0);
+        TS_ASSERT(stats["average_performance"] >= 0.0);
+        TS_ASSERT(stats["evaluated_policies"] >= 0.0);
+    }
+
+    // Test custom fitness function
+    void testCustomFitnessFunction()
+    {
+        // Set custom fitness function
+        policy_optimizer->setFitnessFunction([](const Policy& policy, const Handle& context) {
+            return 0.75; // Fixed fitness for testing
+        });
+        
+        Handle policy_id = policy_optimizer->createPolicy("CustomFitnessPolicy", test_conditions, test_actions);
+        
+        double performance = policy_optimizer->evaluatePolicy(policy_id, test_context);
+        TS_ASSERT_EQUALS(performance, 0.75);
+    }
+
+    // Test policy retrieval by handle
+    void testPolicyRetrievalByHandle()
+    {
+        Handle policy_id = policy_optimizer->createPolicy("RetrievablePolicy", test_conditions, test_actions);
+        
+        Policy policy = policy_optimizer->getPolicy(policy_id);
+        TS_ASSERT(policy.id == policy_id);
+        TS_ASSERT_EQUALS(policy.name, "RetrievablePolicy");
+        
+        // Test retrieval with invalid handle
+        Handle fake_policy = atomspace->add_node(CONCEPT_NODE, "FakePolicy");
+        Policy empty_policy = policy_optimizer->getPolicy(fake_policy);
+        TS_ASSERT(empty_policy.id == Handle::UNDEFINED);
+    }
+
+    // Test configuration
+    void testConfiguration()
+    {
+        PolicyOptimizerConfig new_config;
+        new_config.population_size = 20;
+        new_config.max_generations = 10;
+        new_config.mutation_rate = 0.2;
+        
+        policy_optimizer->configure(new_config);
+        
+        // Configuration should be applied internally
+        // (no direct way to verify without exposing internal state)
+    }
+
+    // Test reset functionality
+    void testReset()
+    {
+        // Create some policies
+        policy_optimizer->createPolicy("Policy1", test_conditions, test_actions);
+        policy_optimizer->createPolicy("Policy2", test_conditions, test_actions);
+        
+        TS_ASSERT_EQUALS(policy_optimizer->getPolicyCount(), 2);
+        
+        // Reset
+        policy_optimizer->reset();
+        
+        TS_ASSERT_EQUALS(policy_optimizer->getPolicyCount(), 0);
+        TS_ASSERT_EQUALS(policy_optimizer->getCurrentGeneration(), 0);
+        
+        // Should still be able to create new policies
+        Handle new_policy = policy_optimizer->createPolicy("NewPolicy", test_conditions, test_actions);
+        TS_ASSERT(new_policy != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(policy_optimizer->getPolicyCount(), 1);
+    }
+
+    // Test best policy tracking
+    void testBestPolicyTracking()
+    {
+        // Create policies with different performances
+        Handle policy1 = policy_optimizer->createPolicy("Policy1", test_conditions, test_actions);
+        Handle policy2 = policy_optimizer->createPolicy("Policy2", test_conditions, test_actions);
+        
+        policy_optimizer->updatePolicyPerformance(policy1, 0.4, test_context);
+        policy_optimizer->updatePolicyPerformance(policy2, 0.8, test_context);
+        
+        // Run evolution to update best policy
+        policy_optimizer->evolvePolicies(2);
+        
+        Policy best_overall = policy_optimizer->getBestPolicyOverall();
+        TS_ASSERT(best_overall.fitness >= 0.0);
+    }
+
+    // Test storage integrity validation
+    void testStorageIntegrity()
+    {
+        // Create some policies
+        for (int i = 0; i < 5; i++) {
+            policy_optimizer->createPolicy("Policy" + std::to_string(i), test_conditions, test_actions);
+        }
+        
+        TS_ASSERT(policy_optimizer->validatePolicyIntegrity());
+    }
+
+    // Test resource usage tracking
+    void testResourceUsage()
+    {
+        // Create some policies
+        for (int i = 0; i < 5; i++) {
+            policy_optimizer->createPolicy("ResourcePolicy" + std::to_string(i), test_conditions, test_actions);
+        }
+        
+        std::map<std::string, size_t> usage = policy_optimizer->getResourceUsage();
+        TS_ASSERT(usage.size() > 0);
+        // Specific usage metrics depend on implementation
+    }
+
+    // Test performance with many policies
+    void testPerformanceWithManyPolicies()
+    {
+        // Create many policies
+        for (int i = 0; i < 20; i++) {
+            Handle conditions = atomspace->add_node(CONCEPT_NODE, "Conditions" + std::to_string(i));
+            Handle actions = atomspace->add_node(CONCEPT_NODE, "Actions" + std::to_string(i));
+            
+            policy_optimizer->createPolicy("Policy" + std::to_string(i), conditions, actions);
+        }
+        
+        TS_ASSERT_EQUALS(policy_optimizer->getPolicyCount(), 20);
+        
+        // System should still function properly
+        Handle best = policy_optimizer->optimizePolicies(test_context, test_objective, 2);
+        TS_ASSERT(best != Handle::UNDEFINED);
+        
+        auto stats = policy_optimizer->getOptimizationStatistics();
+        TS_ASSERT_EQUALS(stats["total_policies"], 20.0);
+        
+        TS_ASSERT(policy_optimizer->validatePolicyIntegrity());
+    }
+
+    // Test policy diversity (if implemented)
+    void testPolicyDiversity()
+    {
+        // Create diverse policies
+        for (int i = 0; i < 10; i++) {
+            Handle conditions = atomspace->add_node(CONCEPT_NODE, "DivConditions" + std::to_string(i));
+            Handle actions = atomspace->add_node(CONCEPT_NODE, "DivActions" + std::to_string(i));
+            
+            policy_optimizer->createPolicy("DivPolicy" + std::to_string(i), conditions, actions);
+        }
+        
+        double diversity = policy_optimizer->getPolicyDiversity();
+        TS_ASSERT(diversity >= 0.0 && diversity <= 1.0);
+    }
+
+    // Test edge cases
+    void testEdgeCases()
+    {
+        // Test creating policy with empty name
+        Handle policy_id = policy_optimizer->createPolicy("", test_conditions, test_actions);
+        TS_ASSERT(policy_id != Handle::UNDEFINED);
+        
+        // Test optimization with no policies initially
+        Handle best = policy_optimizer->optimizePolicies(test_context, test_objective, 1);
+        // May return undefined if no policies exist
+        
+        // Test evolution with no policies
+        Policy evolved = policy_optimizer->evolvePolicies(1);
+        // Should handle gracefully
+        
+        // Test with undefined handles
+        Handle undefined_policy = policy_optimizer->createPolicy("UndefinedPolicy", Handle::UNDEFINED, Handle::UNDEFINED);
+        TS_ASSERT(undefined_policy != Handle::UNDEFINED);
+    std::unique_ptr<PolicyOptimizer> optimizer;
+    std::shared_ptr<TestFitnessFunction> fitness_func;
+
+public:
+    void setUp() {
+        logger().set_level(Logger::INFO);
+        logger().set_print_to_stdout_flag(true);
+        
+        atomspace = std::make_shared<AtomSpace>();
+        
+        // Create test configuration
+        LearningConfig config = utils::getDefaultConfig("fast"); // Use fast config for testing
+        config.max_evals = 100;  // Very small for quick tests
+        config.max_gens = 10;
+        config.population_size = 20;
+        
+        optimizer = std::make_unique<PolicyOptimizer>(atomspace, config);
+        fitness_func = std::make_shared<TestFitnessFunction>();
+    }
+    
+    void tearDown() {
+        optimizer.reset();
+        atomspace.reset();
+        fitness_func.reset();
+    }
+    
+    void testPolicyOptimizerConstruction() {
+        TS_ASSERT(optimizer != nullptr);
+        TS_ASSERT(atomspace != nullptr);
+        
+        // Test configuration
+        const auto& config = optimizer->getConfig();
+        TS_ASSERT_EQUALS(config.max_evals, 100);
+        TS_ASSERT_EQUALS(config.max_gens, 10);
+        TS_ASSERT_EQUALS(config.population_size, 20);
+    }
+    
+    void testInitialization() {
+        TS_ASSERT(optimizer->initialize(fitness_func));
+        TS_ASSERT(optimizer->getFitnessFunction() != nullptr);
+        TS_ASSERT_EQUALS(optimizer->getFitnessFunction()->getName(), "TestFitnessFunction");
+    }
+    
+    void testPolicyEvolution() {
+        TS_ASSERT(optimizer->initialize(fitness_func));
+        
+        // Evolve a simple policy
+        auto policy = optimizer->evolvePolicy("test_policy_1");
+        
+        if (policy) {
+            TS_ASSERT(!policy->id.empty());
+            TS_ASSERT_EQUALS(policy->id, "test_policy_1");
+            TS_ASSERT(policy->fitness_score >= 0.0);
+            TS_ASSERT(!policy->program_source.empty());
+            
+            logger().info("Evolved policy with fitness: %f", policy->fitness_score);
+        } else {
+            TS_WARN("Policy evolution failed - this may happen with very small test parameters");
+        }
+    }
+    
+    void testPolicyStorage() {
+        TS_ASSERT(optimizer->initialize(fitness_func));
+        
+        // Create a simple policy for testing storage
+        Policy test_policy("storage_test", Handle::UNDEFINED, opencog::combo::combo_tree());
+        test_policy.fitness_score = 0.75;
+        test_policy.program_source = "test_program";
+        test_policy.input_features = {"input1", "input2"};
+        test_policy.output_type = "action";
+        
+        // Store policy
+        Handle policy_atom = optimizer->storePolicyInAtomSpace(test_policy);
+        TS_ASSERT(policy_atom != Handle::UNDEFINED);
+        
+        // Retrieve policy
+        auto retrieved_policy = optimizer->retrievePolicyFromAtomSpace("storage_test");
+        if (retrieved_policy) {
+            TS_ASSERT_EQUALS(retrieved_policy->id, "storage_test");
+            // Note: fitness_score retrieval depends on proper AtomSpace value handling
+        }
+    }
+    
+    void testGetAllPolicies() {
+        TS_ASSERT(optimizer->initialize(fitness_func));
+        
+        // Initially should have no policies
+        auto policies = optimizer->getAllPolicies();
+        size_t initial_count = policies.size();
+        
+        // Try to evolve a policy
+        auto policy = optimizer->evolvePolicy("test_get_all");
+        
+        // Check if policy count increased
+        policies = optimizer->getAllPolicies();
+        if (policy) {
+            TS_ASSERT(policies.size() >= initial_count);
+        }
+    }
+    
+    void testOptimizationStats() {
+        auto stats = optimizer->getOptimizationStats();
+        
+        // Check that basic stats are present
+        TS_ASSERT(stats.find("total_evaluations") != stats.end());
+        TS_ASSERT(stats.find("total_generations") != stats.end());
+        TS_ASSERT(stats.find("best_fitness_ever") != stats.end());
+        TS_ASSERT(stats.find("average_fitness") != stats.end());
+        TS_ASSERT(stats.find("optimization_time_seconds") != stats.end());
+        
+        // Initially should be zero or default values
+        TS_ASSERT_EQUALS(stats["total_evaluations"], 0.0);
+        TS_ASSERT_EQUALS(stats["total_generations"], 0.0);
+    }
+    
+    void testConfigurationUpdate() {
+        LearningConfig new_config = utils::getDefaultConfig("memory_efficient");
+        new_config.max_evals = 50;
+        
+        optimizer->updateConfig(new_config);
+        
+        const auto& updated_config = optimizer->getConfig();
+        TS_ASSERT_EQUALS(updated_config.max_evals, 50);
+    }
+    
+    void testStatsReset() {
+        optimizer->resetStats();
+        
+        auto stats = optimizer->getOptimizationStats();
+        TS_ASSERT_EQUALS(stats["total_evaluations"], 0.0);
+        TS_ASSERT_EQUALS(stats["total_generations"], 0.0);
+    }
+};

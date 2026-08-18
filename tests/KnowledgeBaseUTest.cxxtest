@@ -1,0 +1,249 @@
+/*
+ * tests/KnowledgeBaseUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for KnowledgeBase
+ * Part of the AGENT-ZERO-GENESIS project - Phase 3
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/atom_types/atom_types.h>
+#include <opencog/agentzero/knowledge/KnowledgeBase.h>
+
+using namespace opencog;
+using namespace opencog::agentzero::knowledge;
+
+class KnowledgeBaseUTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr _atomspace;
+    std::unique_ptr<KnowledgeBase> _kb;
+
+public:
+    void setUp()
+    {
+        _atomspace = std::make_shared<AtomSpace>();
+        _kb = std::make_unique<KnowledgeBase>(_atomspace);
+    }
+
+    void tearDown()
+    {
+        if (_kb) {
+            _kb->shutdown();
+            _kb.reset();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Lifecycle
+    // -------------------------------------------------------------------------
+
+    void test_initialization()
+    {
+        TS_ASSERT(_kb != nullptr);
+        TS_ASSERT(_kb->initialize());
+        TS_ASSERT(_kb->isInitialized());
+        TS_ASSERT(_kb->isHealthy());
+    }
+
+    void test_double_initialization_is_safe()
+    {
+        TS_ASSERT(_kb->initialize());
+        TS_ASSERT(_kb->initialize()); // should be idempotent
+    }
+
+    void test_shutdown()
+    {
+        TS_ASSERT(_kb->initialize());
+        TS_ASSERT(_kb->shutdown());
+        TS_ASSERT(!_kb->isInitialized());
+    }
+
+    // -------------------------------------------------------------------------
+    // Bulk Load - triples
+    // -------------------------------------------------------------------------
+
+    void test_load_from_triples_basic()
+    {
+        TS_ASSERT(_kb->initialize());
+
+        std::vector<std::tuple<std::string, std::string, std::string>> triples = {
+            {"cat",   "isa",        "animal"},
+            {"dog",   "isa",        "animal"},
+            {"eagle", "isa",        "bird"},
+            {"bird",  "isa",        "animal"},
+            {"cat",   "has-part",   "paw"},
+        };
+
+        auto result = _kb->loadFromTriples(triples);
+        TS_ASSERT(result.success);
+        TS_ASSERT_EQUALS(result.atoms_loaded, triples.size());
+        TS_ASSERT_EQUALS(result.atoms_failed, 0u);
+    }
+
+    void test_load_from_triples_with_namespace()
+    {
+        TS_ASSERT(_kb->initialize());
+
+        std::vector<std::tuple<std::string, std::string, std::string>> triples = {
+            {"cat", "isa", "animal"},
+        };
+
+        auto result = _kb->loadFromTriples(triples, "bio");
+        TS_ASSERT(result.success);
+        TS_ASSERT_EQUALS(result.atoms_loaded, 1u);
+
+        // Check that atoms were created with namespace prefix
+        auto hits = _kb->queryByName("bio:cat");
+        TS_ASSERT(!hits.empty());
+    }
+
+    void test_load_from_adjacency()
+    {
+        TS_ASSERT(_kb->initialize());
+
+        std::map<std::string, std::vector<std::string>> adjacency = {
+            {"animal", {"cat", "dog", "bird"}},
+            {"cat",    {"kitten"}},
+        };
+
+        auto result = _kb->loadFromAdjacency(adjacency, "related-to");
+        TS_ASSERT(result.success);
+        TS_ASSERT_EQUALS(result.atoms_loaded, 4u); // 3 + 1 triples
+        TS_ASSERT_EQUALS(result.atoms_failed, 0u);
+    }
+
+    // -------------------------------------------------------------------------
+    // Query by type / name
+    // -------------------------------------------------------------------------
+
+    void test_query_by_name()
+    {
+        TS_ASSERT(_kb->initialize());
+
+        std::vector<std::tuple<std::string, std::string, std::string>> triples = {
+            {"cat", "isa", "animal"},
+            {"dog", "isa", "animal"},
+        };
+        _kb->loadFromTriples(triples);
+
+        auto hits = _kb->queryByName("cat");
+        TS_ASSERT(!hits.empty());
+    }
+
+    void test_query_by_type()
+    {
+        TS_ASSERT(_kb->initialize());
+
+        _atomspace->add_node(CONCEPT_NODE, "test-node-alpha");
+        _atomspace->add_node(CONCEPT_NODE, "test-node-beta");
+
+        auto concept_nodes = _kb->queryByType(CONCEPT_NODE);
+        TS_ASSERT(concept_nodes.size() >= 2u);
+    }
+
+    // -------------------------------------------------------------------------
+    // SPARQL-like query
+    // -------------------------------------------------------------------------
+
+    void test_simple_sparql_query()
+    {
+        TS_ASSERT(_kb->initialize());
+
+        std::vector<std::tuple<std::string, std::string, std::string>> triples = {
+            {"cat",   "isa", "animal"},
+            {"dog",   "isa", "animal"},
+            {"eagle", "isa", "bird"},
+        };
+        _kb->loadFromTriples(triples);
+
+        // Query: ?x isa animal
+        QueryTriple pat;
+        pat.subject   = "?x";
+        pat.predicate = "isa";
+        pat.object    = "animal";
+
+        auto result = _kb->query({pat});
+        TS_ASSERT(result.success);
+        TS_ASSERT(result.total_matches >= 2u);
+    }
+
+    void test_sparql_query_with_concrete_subject()
+    {
+        TS_ASSERT(_kb->initialize());
+
+        std::vector<std::tuple<std::string, std::string, std::string>> triples = {
+            {"cat", "isa",      "animal"},
+            {"cat", "has-part", "paw"},
+        };
+        _kb->loadFromTriples(triples);
+
+        // Query: cat ?pred ?obj
+        QueryTriple pat;
+        pat.subject   = "cat";
+        pat.predicate = "?pred";
+        pat.object    = "?obj";
+
+        auto result = _kb->query({pat});
+        TS_ASSERT(result.success);
+        TS_ASSERT(result.total_matches >= 2u);
+    }
+
+    // -------------------------------------------------------------------------
+    // Direct operations
+    // -------------------------------------------------------------------------
+
+    void test_add_and_contains_atom()
+    {
+        TS_ASSERT(_kb->initialize());
+
+        Handle h = _atomspace->add_node(CONCEPT_NODE, "my-concept");
+        Handle added = _kb->addAtom(h);
+        TS_ASSERT(added != Handle::UNDEFINED);
+        TS_ASSERT(_kb->contains(added));
+    }
+
+    void test_remove_atom()
+    {
+        TS_ASSERT(_kb->initialize());
+
+        Handle h = _atomspace->add_node(CONCEPT_NODE, "removable-concept");
+        _kb->addAtom(h);
+        TS_ASSERT(_kb->contains(h));
+        TS_ASSERT(_kb->removeAtom(h));
+    }
+
+    void test_size()
+    {
+        TS_ASSERT(_kb->initialize());
+
+        size_t initial = _kb->size();
+        _atomspace->add_node(CONCEPT_NODE, "size-test-node");
+        TS_ASSERT(_kb->size() > initial);
+    }
+
+    // -------------------------------------------------------------------------
+    // Statistics
+    // -------------------------------------------------------------------------
+
+    void test_stats_summary()
+    {
+        TS_ASSERT(_kb->initialize());
+        std::string summary = _kb->getStatsSummary();
+        TS_ASSERT(!summary.empty());
+        TS_ASSERT(summary.find("KnowledgeBase") != std::string::npos);
+    }
+
+    void test_type_counts()
+    {
+        TS_ASSERT(_kb->initialize());
+        _atomspace->add_node(CONCEPT_NODE, "type-count-test");
+        auto counts = _kb->getTypeCounts();
+        TS_ASSERT(!counts.empty());
+        TS_ASSERT(counts.count("ConceptNode") > 0u);
+    }
+};

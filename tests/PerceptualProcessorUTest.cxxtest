@@ -1,0 +1,252 @@
+/*
+ * tests/PerceptualProcessorUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for PerceptualProcessor
+ * Part of the AGENT-ZERO-GENESIS project - Task AZ-PERC-002
+ */
+
+#include <cxxtest/TestSuite.h>
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Handle.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/atom_types/types.h>
+
+#include "opencog/agentzero/PerceptualProcessor.h"
+
+using namespace opencog;
+using namespace opencog::agentzero;
+
+class PerceptualProcessorUTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr atomspace;
+    Handle agent_self;
+    std::unique_ptr<PerceptualProcessor> processor;
+
+public:
+    void setUp()
+    {
+        atomspace = createAtomSpace();
+        agent_self = atomspace->add_node(CONCEPT_NODE, "TestAgent");
+        processor = std::make_unique<PerceptualProcessor>(atomspace, agent_self);
+    }
+
+    void tearDown()
+    {
+        processor.reset();
+        atomspace.reset();
+    }
+
+    void testConstructorValid()
+    {
+        TS_ASSERT(processor != nullptr);
+        TS_ASSERT_EQUALS(processor->getAtomSpace(), atomspace);
+        TS_ASSERT_EQUALS(processor->getAgentSelf(), agent_self);
+    }
+
+    void testConstructorInvalidAtomSpace()
+    {
+        TS_ASSERT_THROWS(PerceptualProcessor(nullptr, agent_self), std::invalid_argument);
+    }
+
+    void testConstructorInvalidAgentSelf()
+    {
+        TS_ASSERT_THROWS(PerceptualProcessor(atomspace, Handle::UNDEFINED), std::invalid_argument);
+    }
+
+    void testProcessVisualInput()
+    {
+        // Create test visual input
+        std::vector<double> visual_data = {0.1, 0.5, 0.8, 0.3, 0.7};
+        SensoryInput input("visual", "camera", visual_data, 0.9);
+        
+        Handle result = processor->processInput(input);
+        
+        TS_ASSERT(result != Handle::UNDEFINED);
+        TS_ASSERT(result->is_node());
+        
+        // Check that atoms were created in atomspace
+        size_t atom_count = atomspace->get_size();
+        TS_ASSERT_LESS_THAN(0, atom_count);
+    }
+
+    void testProcessAuditoryInput()
+    {
+        // Create test auditory input
+        std::vector<double> audio_data = {0.2, 0.4, 0.6, 0.8, 0.1};
+        SensoryInput input("auditory", "microphone", audio_data, 0.8);
+        
+        Handle result = processor->processInput(input);
+        
+        TS_ASSERT(result != Handle::UNDEFINED);
+        TS_ASSERT(result->is_node());
+    }
+
+    void testProcessTactileInput()
+    {
+        // Create test tactile input
+        std::vector<double> tactile_data = {0.3, 0.7, 0.2, 0.9, 0.5};
+        SensoryInput input("tactile", "pressure", tactile_data, 0.7);
+        
+        Handle result = processor->processInput(input);
+        
+        TS_ASSERT(result != Handle::UNDEFINED);
+        TS_ASSERT(result->is_node());
+    }
+
+    void testProcessGenericInput()
+    {
+        // Create test generic input
+        std::vector<double> generic_data = {1.0, 2.0, 3.0};
+        SensoryInput input("temperature", "thermal", generic_data, 0.6);
+        
+        Handle result = processor->processInput(input);
+        
+        TS_ASSERT(result != Handle::UNDEFINED);
+        TS_ASSERT(result->is_node());
+    }
+
+    void testProcessEmptyData()
+    {
+        // Create input with empty data (should still work)
+        std::vector<double> empty_data;
+        SensoryInput input("visual", "camera", empty_data, 0.5);
+        
+        Handle result = processor->processInput(input);
+        
+        TS_ASSERT(result != Handle::UNDEFINED);
+    }
+
+    void testProcessInvalidConfidence()
+    {
+        // Test with invalid confidence values
+        std::vector<double> data = {1.0, 2.0, 3.0};
+        
+        SensoryInput invalid_high("visual", "camera", data, 1.5);
+        Handle result_high = processor->processInput(invalid_high);
+        TS_ASSERT_EQUALS(result_high, Handle::UNDEFINED);
+        
+        SensoryInput invalid_low("visual", "camera", data, -0.5);
+        Handle result_low = processor->processInput(invalid_low);
+        TS_ASSERT_EQUALS(result_low, Handle::UNDEFINED);
+    }
+
+    void testProcessInvalidData()
+    {
+        // Test with NaN and infinity values
+        std::vector<double> invalid_data = {1.0, std::numeric_limits<double>::quiet_NaN(), 3.0};
+        SensoryInput input("visual", "camera", invalid_data, 0.8);
+        
+        Handle result = processor->processInput(input);
+        TS_ASSERT_EQUALS(result, Handle::UNDEFINED);
+        
+        std::vector<double> inf_data = {1.0, std::numeric_limits<double>::infinity(), 3.0};
+        SensoryInput inf_input("visual", "camera", inf_data, 0.8);
+        
+        Handle inf_result = processor->processInput(inf_input);
+        TS_ASSERT_EQUALS(inf_result, Handle::UNDEFINED);
+    }
+
+    void testProcessBatch()
+    {
+        // Create batch of inputs
+        std::vector<SensoryInput> inputs;
+        inputs.emplace_back("visual", "camera", std::vector<double>{1.0, 2.0}, 0.9);
+        inputs.emplace_back("auditory", "microphone", std::vector<double>{3.0, 4.0}, 0.8);
+        inputs.emplace_back("tactile", "pressure", std::vector<double>{5.0, 6.0}, 0.7);
+        
+        std::vector<Handle> results = processor->processBatch(inputs);
+        
+        TS_ASSERT_EQUALS(results.size(), inputs.size());
+        
+        // All results should be valid
+        for (const Handle& result : results) {
+            TS_ASSERT(result != Handle::UNDEFINED);
+        }
+    }
+
+    void testSetPerceptionContext()
+    {
+        Handle context = atomspace->add_node(CONCEPT_NODE, "TestContext");
+        processor->setPerceptionContext(context);
+        
+        // Process an input and verify context is used
+        std::vector<double> data = {1.0, 2.0, 3.0};
+        SensoryInput input("visual", "camera", data, 0.8);
+        
+        Handle result = processor->processInput(input);
+        TS_ASSERT(result != Handle::UNDEFINED);
+        
+        // Check that context-related atoms were created
+        // This is a simplified check - in a real implementation you'd verify
+        // the specific context linking structure
+        size_t atom_count_after = atomspace->get_size();
+        TS_ASSERT_LESS_THAN(0, atom_count_after);
+    }
+
+    void testProcessingStats()
+    {
+        // Initial stats should show no processing
+        std::string initial_stats = processor->getProcessingStats();
+        TS_ASSERT(initial_stats.find("\"processed_count\":0") != std::string::npos);
+        
+        // Process some inputs
+        std::vector<double> data = {1.0, 2.0, 3.0};
+        SensoryInput valid_input("visual", "camera", data, 0.8);
+        processor->processInput(valid_input);
+        
+        SensoryInput invalid_input("visual", "camera", data, 2.0); // Invalid confidence
+        processor->processInput(invalid_input);
+        
+        // Check updated stats
+        std::string updated_stats = processor->getProcessingStats();
+        TS_ASSERT(updated_stats.find("\"processed_count\":1") != std::string::npos);
+        TS_ASSERT(updated_stats.find("\"error_count\":1") != std::string::npos);
+    }
+
+    void testHealthyStatus()
+    {
+        // Initially should be healthy (no processing yet)
+        TS_ASSERT(processor->isHealthy());
+        
+        // Process some valid inputs
+        std::vector<double> data = {1.0, 2.0, 3.0};
+        for (int i = 0; i < 10; ++i) {
+            SensoryInput input("visual", "camera", data, 0.8);
+            processor->processInput(input);
+        }
+        
+        // Should still be healthy
+        TS_ASSERT(processor->isHealthy());
+        
+        // Process many invalid inputs to make it unhealthy
+        for (int i = 0; i < 20; ++i) {
+            SensoryInput invalid_input("visual", "camera", data, 2.0); // Invalid confidence
+            processor->processInput(invalid_input);
+        }
+        
+        // Now should be unhealthy (high error rate)
+        TS_ASSERT(!processor->isHealthy());
+    }
+
+    void testResetStats()
+    {
+        // Process some inputs
+        std::vector<double> data = {1.0, 2.0, 3.0};
+        SensoryInput input("visual", "camera", data, 0.8);
+        processor->processInput(input);
+        
+        // Reset stats
+        processor->resetStats();
+        
+        // Stats should be reset
+        std::string stats = processor->getProcessingStats();
+        TS_ASSERT(stats.find("\"processed_count\":0") != std::string::npos);
+        TS_ASSERT(stats.find("\"error_count\":0") != std::string::npos);
+        TS_ASSERT(processor->isHealthy());
+    }
+};

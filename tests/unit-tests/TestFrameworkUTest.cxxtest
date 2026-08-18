@@ -1,0 +1,258 @@
+/*
+ * tests/unit-tests/TestFrameworkUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for the Agent-Zero Test Framework itself
+ * Part of AZ-TEST-001: Create unit test framework for Agent-Zero modules
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <memory>
+#include <chrono>
+
+#include "../framework/TestFramework.h"
+
+using namespace opencog::agentzero::test;
+
+class TestFrameworkUTest : public CxxTest::TestSuite
+{
+private:
+    std::unique_ptr<UnitTestFramework> unit_framework;
+    std::unique_ptr<IntegrationTestFramework> integration_framework;
+    std::unique_ptr<PerformanceTestFramework> performance_framework;
+    std::unique_ptr<RegressionTestFramework> regression_framework;
+
+public:
+    void setUp()
+    {
+        unit_framework = std::make_unique<UnitTestFramework>();
+        integration_framework = std::make_unique<IntegrationTestFramework>();
+        performance_framework = std::make_unique<PerformanceTestFramework>();
+        regression_framework = std::make_unique<RegressionTestFramework>();
+    }
+
+    void tearDown()
+    {
+        unit_framework.reset();
+        integration_framework.reset();
+        performance_framework.reset();
+        regression_framework.reset();
+    }
+
+    void test_UnitTestFramework_BasicSetup()
+    {
+        unit_framework->setUp();
+        
+        TS_ASSERT(unit_framework->getTestAtomSpace() != nullptr);
+        TS_ASSERT(unit_framework->getTestCogServer() != nullptr);
+        TS_ASSERT_EQUALS(unit_framework->getAtomSpaceSize(), 0);
+        
+        unit_framework->tearDown();
+    }
+
+    void test_UnitTestFramework_AtomSpaceOperations()
+    {
+        unit_framework->setUp();
+        
+        // Test atom creation
+        Handle test_atom = unit_framework->createTestAtom(CONCEPT_NODE, "TestAtom");
+        TS_ASSERT(test_atom != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(unit_framework->getAtomSpaceSize(), 1);
+        
+        // Test AtomSpace integrity
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*unit_framework);
+        
+        // Test AtomSpace clearing
+        unit_framework->clearAtomSpace();
+        TS_ASSERT_EQUALS(unit_framework->getAtomSpaceSize(), 0);
+        
+        unit_framework->tearDown();
+    }
+
+    void test_UnitTestFramework_PerformanceTracking()
+    {
+        unit_framework->setUp();
+        unit_framework->enablePerformanceTesting(true);
+        
+        // Set strict performance targets for unit tests
+        PerformanceTargets targets(
+            std::chrono::milliseconds{50},  // max 50ms
+            512 * 1024,  // max 512KB
+            100          // max 100 atoms
+        );
+        unit_framework->setPerformanceTargets(targets);
+        
+        // Test performance monitoring
+        unit_framework->startTestTimer("performance_test");
+        
+        // Do some work
+        for (int i = 0; i < 10; ++i) {
+            unit_framework->createTestAtom(CONCEPT_NODE, "PerfTest_" + std::to_string(i));
+        }
+        
+        unit_framework->stopTestTimer();
+        
+        // Performance should be within limits for this simple test
+        TS_ASSERT_PERFORMANCE_OK(*unit_framework);
+        
+        TestMetrics metrics = unit_framework->getTestMetrics("performance_test");
+        TS_ASSERT(metrics.execution_time.count() >= 0);
+        TS_ASSERT(metrics.atoms_created == 10);
+        
+        unit_framework->tearDown();
+    }
+
+    void test_IntegrationTestFramework_FullSetup()
+    {
+        integration_framework->setUp();
+        
+        TS_ASSERT(integration_framework->getTestAtomSpace() != nullptr);
+        TS_ASSERT(integration_framework->getTestCogServer() != nullptr);
+        
+        // Integration tests should have more relaxed performance targets
+        integration_framework->startTestTimer("integration_setup_test");
+        
+        // Simulate more complex setup
+        for (int i = 0; i < 100; ++i) {
+            integration_framework->createTestAtom(CONCEPT_NODE, "IntegrationAtom_" + std::to_string(i));
+        }
+        
+        integration_framework->stopTestTimer();
+        
+        // Should handle larger atom sets
+        TS_ASSERT(integration_framework->getAtomSpaceSize() == 100);
+        TS_ASSERT_ATOMSPACE_INTEGRITY(*integration_framework);
+        
+        integration_framework->tearDown();
+    }
+
+    void test_PerformanceTestFramework_Benchmarking()
+    {
+        performance_framework->setUp();
+        
+        // Test benchmark functionality
+        performance_framework->startBenchmark("atom_creation_benchmark");
+        
+        for (int i = 0; i < 1000; ++i) {
+            performance_framework->createTestAtom(CONCEPT_NODE, "BenchmarkAtom_" + std::to_string(i));
+        }
+        
+        performance_framework->endBenchmark("atom_creation_benchmark");
+        
+        // Verify benchmark was recorded
+        TestMetrics stats = performance_framework->calculateBenchmarkStatistics("atom_creation_benchmark");
+        TS_ASSERT(stats.execution_time.count() > 0);
+        TS_ASSERT(stats.atoms_created == 1000);
+        
+        performance_framework->tearDown();
+    }
+
+    void test_PerformanceTestFramework_StressTesting()
+    {
+        performance_framework->setUp();
+        
+        // Test stress testing capability
+        std::function<void()> stress_function = [this]() {
+            performance_framework->createTestAtom(CONCEPT_NODE, "StressAtom");
+        };
+        
+        performance_framework->runStressTest("stress_test", stress_function, 100);
+        
+        // Should have created atoms during stress test
+        TS_ASSERT(performance_framework->getAtomSpaceSize() >= 100);
+        
+        performance_framework->tearDown();
+    }
+
+    void test_RegressionTestFramework_BaselineManagement()
+    {
+        regression_framework->setUp();
+        
+        // Test baseline creation and validation
+        std::string test_output = "Expected test output";
+        regression_framework->updateBaseline("test_case_1", test_output);
+        
+        // Should validate correctly with same output
+        TS_ASSERT(regression_framework->validateOutput("test_case_1", test_output));
+        
+        // Should fail with different output
+        TS_ASSERT(!regression_framework->validateOutput("test_case_1", "Different output"));
+        
+        // Test similarity calculation
+        double similarity = regression_framework->calculateSimilarity("hello", "hello");
+        TS_ASSERT_EQUALS(similarity, 1.0);
+        
+        similarity = regression_framework->calculateSimilarity("hello", "world");
+        TS_ASSERT(similarity < 1.0);
+        
+        regression_framework->tearDown();
+    }
+
+    void test_TestFramework_MemoryMonitoring()
+    {
+        unit_framework->setUp();
+        unit_framework->enablePerformanceTesting(true);
+        
+        // Test memory monitoring
+        size_t initial_memory = unit_framework->getCurrentMemoryUsage();
+        TS_ASSERT(initial_memory > 0);
+        
+        // Create some atoms and check memory increase
+        for (int i = 0; i < 100; ++i) {
+            unit_framework->createTestAtom(CONCEPT_NODE, "MemoryTest_" + std::to_string(i));
+        }
+        
+        unit_framework->trackMemoryUsage();
+        TS_ASSERT_MEMORY_USAGE_OK(*unit_framework);
+        
+        unit_framework->tearDown();
+    }
+
+    void test_TestFramework_ReportGeneration()
+    {
+        unit_framework->setUp();
+        
+        // Run several test scenarios to populate metrics
+        unit_framework->startTestTimer("report_test_1");
+        unit_framework->createTestAtom(CONCEPT_NODE, "ReportAtom1");
+        unit_framework->stopTestTimer();
+        
+        unit_framework->startTestTimer("report_test_2");
+        unit_framework->createTestAtom(CONCEPT_NODE, "ReportAtom2");
+        unit_framework->createTestAtom(CONCEPT_NODE, "ReportAtom3");
+        unit_framework->stopTestTimer();
+        
+        // Test report generation (should not crash)
+        TS_ASSERT_THROWS_NOTHING(unit_framework->generateTestReport());
+        
+        // Test individual metrics retrieval
+        TestMetrics metrics1 = unit_framework->getTestMetrics("report_test_1");
+        TestMetrics metrics2 = unit_framework->getTestMetrics("report_test_2");
+        
+        TS_ASSERT(metrics1.execution_time.count() >= 0);
+        TS_ASSERT(metrics2.execution_time.count() >= 0);
+        TS_ASSERT_EQUALS(metrics1.atoms_created, 1);
+        TS_ASSERT_EQUALS(metrics2.atoms_created, 2);
+        
+        unit_framework->tearDown();
+    }
+
+    void test_TestFramework_MacroUtilities()
+    {
+        unit_framework->setUp();
+        unit_framework->enablePerformanceTesting(true);
+        
+        // Test the TS_BENCHMARK macro
+        TS_BENCHMARK(*unit_framework, "macro_test", {
+            unit_framework->createTestAtom(CONCEPT_NODE, "MacroTestAtom");
+        });
+        
+        TestMetrics metrics = unit_framework->getTestMetrics("macro_test");
+        TS_ASSERT(metrics.execution_time.count() >= 0);
+        TS_ASSERT_EQUALS(metrics.atoms_created, 1);
+        
+        unit_framework->tearDown();
+    }
+};

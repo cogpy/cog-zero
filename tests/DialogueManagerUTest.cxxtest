@@ -1,0 +1,238 @@
+/*
+ * tests/DialogueManagerUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for DialogueManager class
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/util/Logger.h>
+#include "opencog/agentzero/DialogueManager.h"
+
+using namespace opencog;
+using namespace opencog::agentzero;
+
+class DialogueManagerUTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr _atomspace;
+    DialogueManager* _dialogue_manager;
+
+public:
+    void setUp()
+    {
+        _atomspace = createAtomSpace();
+        _dialogue_manager = new DialogueManager(_atomspace, "TestAgent");
+    }
+
+    void tearDown()
+    {
+        delete _dialogue_manager;
+    }
+
+    void test_constructor()
+    {
+        TS_ASSERT(_dialogue_manager != nullptr);
+        TS_ASSERT_EQUALS(_dialogue_manager->getAgentSelfAtom()->get_name(), "TestAgent");
+        TS_ASSERT(_dialogue_manager->getAtomSpace() != nullptr);
+    }
+
+    void test_start_conversation()
+    {
+        std::vector<std::string> participants = {"TestAgent", "User1", "User2"};
+        bool result = _dialogue_manager->startConversation("conv1", participants);
+        
+        TS_ASSERT(result);
+        TS_ASSERT(_dialogue_manager->isConversationActive("conv1"));
+        
+        auto active_conversations = _dialogue_manager->getActiveConversations();
+        TS_ASSERT_EQUALS(active_conversations.size(), 1);
+        TS_ASSERT_EQUALS(active_conversations[0], "conv1");
+    }
+
+    void test_end_conversation()
+    {
+        std::vector<std::string> participants = {"TestAgent", "User1"};
+        _dialogue_manager->startConversation("conv1", participants);
+        
+        TS_ASSERT(_dialogue_manager->isConversationActive("conv1"));
+        
+        bool result = _dialogue_manager->endConversation("conv1");
+        TS_ASSERT(result);
+        TS_ASSERT(!_dialogue_manager->isConversationActive("conv1"));
+    }
+
+    void test_process_message()
+    {
+        std::vector<std::string> participants = {"TestAgent", "User1"};
+        _dialogue_manager->startConversation("conv1", participants);
+        
+        std::string response = _dialogue_manager->processMessage("conv1", "User1", "Hello!");
+        TS_ASSERT(!response.empty());
+        
+        // Check conversation history
+        auto history = _dialogue_manager->getConversationHistory("conv1");
+        TS_ASSERT_EQUALS(history.size(), 2); // Input message + response
+        TS_ASSERT_EQUALS(history[0].sender_id, "User1");
+        TS_ASSERT_EQUALS(history[0].content, "Hello!");
+        TS_ASSERT_EQUALS(history[1].sender_id, "TestAgent");
+        TS_ASSERT_EQUALS(history[1].content, response);
+    }
+
+    void test_conversation_context()
+    {
+        std::vector<std::string> participants = {"TestAgent", "User1"};
+        _dialogue_manager->startConversation("conv1", participants);
+        
+        _dialogue_manager->setConversationContext("conv1", "key1", "value1");
+        std::string retrieved = _dialogue_manager->getConversationContext("conv1", "key1");
+        TS_ASSERT_EQUALS(retrieved, "value1");
+        
+        // Test non-existent key
+        std::string empty = _dialogue_manager->getConversationContext("conv1", "nonexistent");
+        TS_ASSERT(empty.empty());
+    }
+
+    void test_conversation_topic()
+    {
+        std::vector<std::string> participants = {"TestAgent", "User1"};
+        _dialogue_manager->startConversation("conv1", participants);
+        
+        _dialogue_manager->setConversationTopic("conv1", "AI and Consciousness");
+        std::string topic = _dialogue_manager->getConversationTopic("conv1");
+        TS_ASSERT_EQUALS(topic, "AI and Consciousness");
+    }
+
+    void test_conversation_goals()
+    {
+        std::vector<std::string> participants = {"TestAgent", "User1"};
+        _dialogue_manager->startConversation("conv1", participants);
+        
+        Handle goal_atom = _atomspace->add_node(CONCEPT_NODE, "HelpUser");
+        _dialogue_manager->addConversationGoal("conv1", goal_atom);
+        
+        auto goals = _dialogue_manager->getConversationGoals("conv1");
+        TS_ASSERT_EQUALS(goals.size(), 1);
+        TS_ASSERT_EQUALS(goals[0], goal_atom);
+    }
+
+    void test_message_history()
+    {
+        std::vector<std::string> participants = {"TestAgent", "User1"};
+        _dialogue_manager->startConversation("conv1", participants);
+        
+        // Send multiple messages
+        _dialogue_manager->processMessage("conv1", "User1", "First message");
+        _dialogue_manager->processMessage("conv1", "User1", "Second message");
+        
+        auto history = _dialogue_manager->getConversationHistory("conv1");
+        TS_ASSERT(history.size() >= 2); // At least input messages
+        
+        // Test limited history
+        auto limited = _dialogue_manager->getConversationHistory("conv1", 2);
+        TS_ASSERT(limited.size() <= 2);
+    }
+
+    void test_search_messages()
+    {
+        std::vector<std::string> participants = {"TestAgent", "User1"};
+        _dialogue_manager->startConversation("conv1", participants);
+        
+        _dialogue_manager->processMessage("conv1", "User1", "Hello world");
+        _dialogue_manager->processMessage("conv1", "User1", "Goodbye");
+        
+        auto results = _dialogue_manager->searchMessageHistory("conv1", "Hello");
+        TS_ASSERT_EQUALS(results.size(), 1);
+        TS_ASSERT_EQUALS(results[0].content, "Hello world");
+        
+        auto no_results = _dialogue_manager->searchMessageHistory("conv1", "nonexistent");
+        TS_ASSERT(no_results.empty());
+    }
+
+    void test_conversation_participants()
+    {
+        std::vector<std::string> participants = {"TestAgent", "User1", "User2"};
+        _dialogue_manager->startConversation("conv1", participants);
+        
+        auto retrieved_participants = _dialogue_manager->getConversationParticipants("conv1");
+        TS_ASSERT_EQUALS(retrieved_participants.size(), 3);
+        
+        // Check that all participants are present
+        for (const auto& participant : participants) {
+            TS_ASSERT(std::find(retrieved_participants.begin(), retrieved_participants.end(), participant) 
+                     != retrieved_participants.end());
+        }
+    }
+
+    void test_status_info()
+    {
+        std::vector<std::string> participants = {"TestAgent", "User1"};
+        _dialogue_manager->startConversation("conv1", participants);
+        
+        std::string status = _dialogue_manager->getStatusInfo();
+        TS_ASSERT(!status.empty());
+        TS_ASSERT(status.find("TestAgent") != std::string::npos);
+        TS_ASSERT(status.find("conv1") != std::string::npos);
+    }
+
+    void test_configuration()
+    {
+        _dialogue_manager->setMaxConversationHistory(500);
+        _dialogue_manager->setConversationTimeout(std::chrono::minutes(15));
+        _dialogue_manager->setContextTracking(false);
+        _dialogue_manager->setGoalOrientedDialogue(false);
+        
+        // Configuration changes should not crash - no direct way to verify values
+        TS_ASSERT(true);
+    }
+
+    void test_atomspace_integration()
+    {
+        std::vector<std::string> participants = {"TestAgent", "User1"};
+        _dialogue_manager->startConversation("conv1", participants);
+        
+        Handle conv_atom = _dialogue_manager->conversationToAtom("conv1");
+        TS_ASSERT(conv_atom != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(conv_atom->get_name(), "Conversation:conv1");
+        
+        // Update dialogue atoms
+        _dialogue_manager->updateDialogueAtoms();
+        
+        // Verify AtomSpace contains dialogue-related atoms
+        HandleSeq all_atoms = _atomspace->get_handles_by_type(CONCEPT_NODE);
+        bool found_dialogue_atom = false;
+        for (const Handle& atom : all_atoms) {
+            if (atom->get_name().find("Conversation:") == 0 ||
+                atom->get_name() == "DialogueContext") {
+                found_dialogue_atom = true;
+                break;
+            }
+        }
+        TS_ASSERT(found_dialogue_atom);
+    }
+
+    void test_multiple_conversations()
+    {
+        std::vector<std::string> participants1 = {"TestAgent", "User1"};
+        std::vector<std::string> participants2 = {"TestAgent", "User2"};
+        
+        _dialogue_manager->startConversation("conv1", participants1);
+        _dialogue_manager->startConversation("conv2", participants2);
+        
+        TS_ASSERT(_dialogue_manager->isConversationActive("conv1"));
+        TS_ASSERT(_dialogue_manager->isConversationActive("conv2"));
+        
+        auto active_conversations = _dialogue_manager->getActiveConversations();
+        TS_ASSERT_EQUALS(active_conversations.size(), 2);
+        
+        // Test cross-conversation isolation
+        _dialogue_manager->setConversationTopic("conv1", "Topic1");
+        _dialogue_manager->setConversationTopic("conv2", "Topic2");
+        
+        TS_ASSERT_EQUALS(_dialogue_manager->getConversationTopic("conv1"), "Topic1");
+        TS_ASSERT_EQUALS(_dialogue_manager->getConversationTopic("conv2"), "Topic2");
+    }
+};

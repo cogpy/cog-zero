@@ -1,0 +1,628 @@
+/*
+ * tests/ExperienceManagerUTest.cxxtest
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Unit tests for ExperienceManager class
+ */
+
+#include <cxxtest/TestSuite.h>
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/base/Node.h>
+#include <opencog/atoms/atom_types/atom_types.h>
+
+#include "opencog/agentzero/ExperienceManager.h"
+
+using namespace opencog;
+using namespace opencog::agentzero;
+/**
+ * ExperienceManagerUTest.cxxtest - Unit tests for ExperienceManager
+ * 
+ * Part of AZ-LEARN-003: MOSES Policy Optimization Integration
+ * Copyright (C) 2024 OpenCog Foundation
+ */
+
+#include <cxxtest/TestSuite.h>
+#include <agentzero/learning/ExperienceManager.h>
+#include <agentzero/learning/LearningUtils.h>
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/util/Logger.h>
+
+using namespace opencog;
+using namespace opencog::agentzero::learning;
+
+class ExperienceManagerUTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr atomspace;
+    std::unique_ptr<ExperienceManager> experience_manager;
+    Handle test_context;
+    Handle test_task;
+    Handle test_outcome;
+
+public:
+    void setUp()
+    {
+        atomspace = std::make_shared<AtomSpace>();
+        
+        experience_manager = std::make_unique<ExperienceManager>(atomspace, 100, 0.1, std::chrono::hours(24));
+        experience_manager->initialize();
+        
+        // Create test atoms
+        test_context = atomspace->add_node(CONCEPT_NODE, "TestContext");
+        test_task = atomspace->add_node(CONCEPT_NODE, "TestTask");
+        test_outcome = atomspace->add_node(CONCEPT_NODE, "TestOutcome");
+    }
+
+    void tearDown()
+    {
+        experience_manager.reset();
+        atomspace.reset();
+    }
+
+    // Test initialization
+    void testInitialization()
+    {
+        TS_ASSERT(experience_manager->isInitialized());
+        TS_ASSERT_EQUALS(experience_manager->getExperienceCount(), 0);
+    }
+
+    // Test experience recording
+    void testExperienceRecording()
+    {
+        // Record a learning experience
+        Handle exp_id = experience_manager->recordExperience(ExperienceType::LEARNING, 
+                                                           test_context, test_task, test_outcome, 0.8);
+        TS_ASSERT(exp_id != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(experience_manager->getExperienceCount(), 1);
+        
+        // Record a planning experience
+        Handle exp_id2 = experience_manager->recordExperience(ExperienceType::PLANNING, 
+                                                            test_context, test_task, test_outcome, 0.6);
+        TS_ASSERT(exp_id2 != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(experience_manager->getExperienceCount(), 2);
+    }
+
+    // Test experience retrieval
+    void testExperienceRetrieval()
+    {
+        // Record test experience
+        Handle exp_id = experience_manager->recordExperience(ExperienceType::LEARNING, 
+                                                           test_context, test_task, test_outcome, 0.7);
+        
+        // Retrieve experience by handle
+        Experience exp = experience_manager->getExperience(exp_id);
+        TS_ASSERT(exp.id == exp_id);
+        TS_ASSERT_EQUALS(exp.type, ExperienceType::LEARNING);
+        TS_ASSERT(exp.context == test_context);
+        TS_ASSERT(exp.task == test_task);
+        TS_ASSERT(exp.outcome == test_outcome);
+        TS_ASSERT_EQUALS(exp.importance, 0.7);
+        
+        // Test retrieval of non-existent experience
+        Handle fake_id = atomspace->add_node(CONCEPT_NODE, "FakeExperience");
+        Experience empty_exp = experience_manager->getExperience(fake_id);
+        TS_ASSERT(empty_exp.id == Handle::UNDEFINED);
+    }
+
+    // Test experience querying
+    void testExperienceQuerying()
+    {
+        // Record experiences of different types
+        experience_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, 0.8);
+        experience_manager->recordExperience(ExperienceType::PLANNING, test_context, test_task, test_outcome, 0.6);
+        experience_manager->recordExperience(ExperienceType::EXECUTION, test_context, test_task, test_outcome, 0.9);
+        
+        // Query by type
+        ExperienceQuery query;
+        query.type_filter = ExperienceType::LEARNING;
+        query.max_results = 10;
+        query.start_time = std::chrono::system_clock::now() - std::chrono::hours(1);
+        query.end_time = std::chrono::system_clock::now() + std::chrono::hours(1);
+        
+        std::vector<Experience> learning_experiences = experience_manager->queryExperiences(query);
+        TS_ASSERT_EQUALS(learning_experiences.size(), 1);
+        TS_ASSERT_EQUALS(learning_experiences[0].type, ExperienceType::LEARNING);
+        
+        // Query with importance filter
+        query.type_filter = ExperienceType::EXECUTION; // Reset type filter
+        query.min_importance = 0.85;
+        std::vector<Experience> high_importance = experience_manager->queryExperiences(query);
+        TS_ASSERT_EQUALS(high_importance.size(), 1);
+        TS_ASSERT(high_importance[0].importance >= 0.85);
+    }
+
+    // Test experience types by category
+    void testExperiencesByType()
+    {
+        // Record multiple experiences
+        experience_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, 0.8);
+        experience_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, 0.6);
+        experience_manager->recordExperience(ExperienceType::PLANNING, test_context, test_task, test_outcome, 0.7);
+        
+        // Get experiences by type
+        std::vector<Experience> learning_exp = experience_manager->getExperiencesByType(ExperienceType::LEARNING, 5);
+        TS_ASSERT_EQUALS(learning_exp.size(), 2);
+        
+        std::vector<Experience> planning_exp = experience_manager->getExperiencesByType(ExperienceType::PLANNING, 5);
+        TS_ASSERT_EQUALS(planning_exp.size(), 1);
+        
+        std::vector<Experience> social_exp = experience_manager->getExperiencesByType(ExperienceType::SOCIAL, 5);
+        TS_ASSERT_EQUALS(social_exp.size(), 0);
+    }
+
+    // Test experiences by context
+    void testExperiencesByContext()
+    {
+        Handle other_context = atomspace->add_node(CONCEPT_NODE, "OtherContext");
+        
+        // Record experiences in different contexts
+        experience_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, 0.8);
+        experience_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, 0.6);
+        experience_manager->recordExperience(ExperienceType::LEARNING, other_context, test_task, test_outcome, 0.7);
+        
+        // Get experiences by context
+        std::vector<Experience> test_context_exp = experience_manager->getExperiencesByContext(test_context, 10);
+        TS_ASSERT_EQUALS(test_context_exp.size(), 2);
+        
+        std::vector<Experience> other_context_exp = experience_manager->getExperiencesByContext(other_context, 10);
+        TS_ASSERT_EQUALS(other_context_exp.size(), 1);
+        
+        // Test with undefined context
+        std::vector<Experience> undefined_exp = experience_manager->getExperiencesByContext(Handle::UNDEFINED, 10);
+        TS_ASSERT_EQUALS(undefined_exp.size(), 0);
+    }
+
+    // Test recent experiences
+    void testRecentExperiences()
+    {
+        // Record some experiences
+        for (int i = 0; i < 5; i++) {
+            experience_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, 0.5 + i * 0.1);
+        }
+        
+        // Get recent experiences
+        std::vector<Experience> recent = experience_manager->getRecentExperiences(std::chrono::hours(1), 10);
+        TS_ASSERT_EQUALS(recent.size(), 5);
+        
+        // Check they are sorted by timestamp (most recent first)
+        for (size_t i = 1; i < recent.size(); i++) {
+            TS_ASSERT(recent[i-1].timestamp >= recent[i].timestamp);
+        }
+    }
+
+    // Test importance updates
+    void testImportanceUpdates()
+    {
+        Handle exp_id = experience_manager->recordExperience(ExperienceType::LEARNING, 
+                                                           test_context, test_task, test_outcome, 0.5);
+        
+        // Update importance
+        bool updated = experience_manager->updateExperienceImportance(exp_id, 0.9);
+        TS_ASSERT(updated);
+        
+        // Verify update
+        Experience exp = experience_manager->getExperience(exp_id);
+        TS_ASSERT_EQUALS(exp.importance, 0.9);
+        
+        // Test update with invalid handle
+        Handle fake_id = atomspace->add_node(CONCEPT_NODE, "FakeExperience");
+        bool not_updated = experience_manager->updateExperienceImportance(fake_id, 0.8);
+        TS_ASSERT(!not_updated);
+    }
+
+    // Test pattern analysis
+    void testPatternAnalysis()
+    {
+        // Record some experiences
+        for (int i = 0; i < 10; i++) {
+            ExperienceType type = (i % 2 == 0) ? ExperienceType::LEARNING : ExperienceType::PLANNING;
+            experience_manager->recordExperience(type, test_context, test_task, test_outcome, 0.5 + i * 0.05);
+        }
+        
+        // Analyze patterns
+        Handle patterns = experience_manager->analyzeExperiencePatterns(std::chrono::hours(1));
+        TS_ASSERT(patterns != Handle::UNDEFINED);
+        
+        // Test with no experiences (clear first)
+        experience_manager->clearAllExperiences();
+        Handle no_patterns = experience_manager->analyzeExperiencePatterns(std::chrono::hours(1));
+        TS_ASSERT_EQUALS(no_patterns, Handle::UNDEFINED);
+    }
+
+    // Test similarity finding
+    void testSimilarityFinding()
+    {
+        // Record target experience
+        Handle target_id = experience_manager->recordExperience(ExperienceType::LEARNING, 
+                                                              test_context, test_task, test_outcome, 0.8);
+        Experience target = experience_manager->getExperience(target_id);
+        
+        // Record similar and dissimilar experiences
+        experience_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, 0.7); // Similar
+        experience_manager->recordExperience(ExperienceType::PLANNING, test_context, test_task, test_outcome, 0.6); // Less similar
+        
+        Handle other_context = atomspace->add_node(CONCEPT_NODE, "OtherContext");
+        experience_manager->recordExperience(ExperienceType::EXECUTION, other_context, test_task, test_outcome, 0.5); // Dissimilar
+        
+        // Find similar experiences
+        std::vector<Experience> similar = experience_manager->findSimilarExperiences(target, 5);
+        TS_ASSERT(similar.size() > 0);
+        TS_ASSERT(similar.size() <= 3); // Should exclude the target itself
+    }
+
+    // Test statistics
+    void testStatistics()
+    {
+        // Record experiences of different types
+        experience_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, 0.8);
+        experience_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, 0.6);
+        experience_manager->recordExperience(ExperienceType::PLANNING, test_context, test_task, test_outcome, 0.7);
+        
+        std::map<std::string, double> stats = experience_manager->getExperienceStatistics();
+        
+        TS_ASSERT_EQUALS(stats["total_experiences"], 3.0);
+        TS_ASSERT(stats["average_importance"] > 0.0);
+        TS_ASSERT(stats.find("percent_LEARNING") != stats.end());
+        TS_ASSERT(stats.find("percent_PLANNING") != stats.end());
+    }
+
+    // Test memory usage tracking
+    void testMemoryUsage()
+    {
+        // Record some experiences
+        for (int i = 0; i < 10; i++) {
+            experience_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, 0.5);
+        }
+        
+        std::map<std::string, size_t> usage = experience_manager->getMemoryUsage();
+        
+        TS_ASSERT_EQUALS(usage["total_experiences"], 10);
+        TS_ASSERT(usage["estimated_memory_bytes"] > 0);
+        TS_ASSERT_EQUALS(usage["max_experiences"], 100);
+    }
+
+    // Test memory consolidation
+    void testMemoryConsolidation()
+    {
+        // Create a small memory limit to trigger consolidation
+        auto small_memory_manager = std::make_unique<ExperienceManager>(atomspace, 5, 0.3, std::chrono::hours(24));
+        small_memory_manager->initialize();
+        
+        // Record more experiences than the limit
+        for (int i = 0; i < 10; i++) {
+            double importance = 0.1 + i * 0.1; // Increasing importance
+            small_memory_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, importance);
+        }
+        
+        // Should have consolidated to the limit, keeping most important
+        TS_ASSERT(small_memory_manager->getExperienceCount() <= 5);
+        
+        // Manually trigger consolidation
+        small_memory_manager->consolidateMemoryManual();
+    }
+
+    // Test configuration
+    void testConfiguration()
+    {
+        experience_manager->setMaxExperiences(50);
+        experience_manager->setImportanceThreshold(0.5);
+        experience_manager->setRetentionPeriod(std::chrono::hours(12));
+        
+        auto usage = experience_manager->getMemoryUsage();
+        TS_ASSERT_EQUALS(usage["max_experiences"], 50);
+    }
+
+    // Test utility functions
+    void testUtilityFunctions()
+    {
+        // Test type string conversion
+        std::string learning_str = ExperienceManager::experienceTypeToString(ExperienceType::LEARNING);
+        TS_ASSERT_EQUALS(learning_str, "LEARNING");
+        
+        std::string planning_str = ExperienceManager::experienceTypeToString(ExperienceType::PLANNING);
+        TS_ASSERT_EQUALS(planning_str, "PLANNING");
+        
+        // Test string to type conversion
+        ExperienceType learning_type = ExperienceManager::stringToExperienceType("LEARNING");
+        TS_ASSERT_EQUALS(learning_type, ExperienceType::LEARNING);
+        
+        ExperienceType execution_type = ExperienceManager::stringToExperienceType("EXECUTION");
+        TS_ASSERT_EQUALS(execution_type, ExperienceType::EXECUTION);
+        
+        // Test invalid string
+        ExperienceType default_type = ExperienceManager::stringToExperienceType("INVALID");
+        TS_ASSERT_EQUALS(default_type, ExperienceType::LEARNING); // Should default to LEARNING
+    }
+
+    // Test experience similarity calculation
+    void testExperienceSimilarity()
+    {
+        Experience exp1, exp2;
+        
+        // Identical experiences
+        exp1.type = ExperienceType::LEARNING;
+        exp1.context = test_context;
+        exp1.task = test_task;
+        exp1.importance = 0.8;
+        
+        exp2 = exp1;
+        
+        double similarity = ExperienceManager::calculateExperienceSimilarity(exp1, exp2);
+        TS_ASSERT(similarity > 0.8); // Should be highly similar
+        
+        // Different types
+        exp2.type = ExperienceType::PLANNING;
+        similarity = ExperienceManager::calculateExperienceSimilarity(exp1, exp2);
+        TS_ASSERT(similarity < 0.8); // Should be less similar
+        
+        // Different contexts
+        exp2.type = exp1.type; // Reset type
+        exp2.context = atomspace->add_node(CONCEPT_NODE, "DifferentContext");
+        similarity = ExperienceManager::calculateExperienceSimilarity(exp1, exp2);
+        TS_ASSERT(similarity < 0.8); // Should be less similar
+    }
+
+    // Test storage integrity
+    void testStorageIntegrity()
+    {
+        // Record some experiences
+        for (int i = 0; i < 5; i++) {
+            experience_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, 0.5);
+        }
+        
+        TS_ASSERT(experience_manager->validateStorageIntegrity());
+    }
+
+    // Test clear all experiences
+    void testClearAllExperiences()
+    {
+        // Record some experiences
+        for (int i = 0; i < 5; i++) {
+            experience_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, 0.5);
+        }
+        
+        TS_ASSERT_EQUALS(experience_manager->getExperienceCount(), 5);
+        
+        // Clear all
+        experience_manager->clearAllExperiences();
+        
+        TS_ASSERT_EQUALS(experience_manager->getExperienceCount(), 0);
+        
+        // Should still be able to record new experiences
+        Handle new_exp = experience_manager->recordExperience(ExperienceType::LEARNING, test_context, test_task, test_outcome, 0.7);
+        TS_ASSERT(new_exp != Handle::UNDEFINED);
+        TS_ASSERT_EQUALS(experience_manager->getExperienceCount(), 1);
+    std::unique_ptr<ExperienceManager> manager;
+
+public:
+    void setUp() {
+        logger().set_level(Logger::INFO);
+        logger().set_print_to_stdout_flag(true);
+        
+        atomspace = std::make_shared<AtomSpace>();
+        
+        // Create test configuration with small buffer for testing
+        LearningConfig config = utils::getDefaultConfig("fast");
+        config.experience_buffer_size = 10;  // Small buffer for testing overflow
+        
+        manager = std::make_unique<ExperienceManager>(atomspace, config);
+    }
+    
+    void tearDown() {
+        manager.reset();
+        atomspace.reset();
+    }
+    
+    void testExperienceManagerConstruction() {
+        TS_ASSERT(manager != nullptr);
+        TS_ASSERT(atomspace != nullptr);
+        
+        // Test initial state
+        TS_ASSERT_EQUALS(manager->getExperienceCount(), 0);
+        TS_ASSERT_EQUALS(manager->getBufferSizeLimit(), 10);
+    }
+    
+    void testAddExperience() {
+        // Create test atoms
+        Handle state_atom = atomspace->add_node(CONCEPT_NODE, "TestState1");
+        Handle action_atom = atomspace->add_node(CONCEPT_NODE, "TestAction1");
+        Handle next_state_atom = atomspace->add_node(CONCEPT_NODE, "TestState2");
+        
+        // Add experience
+        ExperienceId exp_id = manager->addExperience(state_atom, action_atom, next_state_atom, 1.0, false);
+        
+        TS_ASSERT(!exp_id.empty());
+        TS_ASSERT_EQUALS(manager->getExperienceCount(), 1);
+        
+        // Retrieve the experience
+        auto experience = manager->getExperience(exp_id);
+        TS_ASSERT(experience != nullptr);
+        TS_ASSERT_EQUALS(experience->state_atom, state_atom);
+        TS_ASSERT_EQUALS(experience->action_atom, action_atom);
+        TS_ASSERT_EQUALS(experience->next_state_atom, next_state_atom);
+        TS_ASSERT_EQUALS(experience->reward, 1.0);
+        TS_ASSERT_EQUALS(experience->terminal, false);
+    }
+    
+    void testExperienceObject() {
+        Handle state_atom = atomspace->add_node(CONCEPT_NODE, "TestState");
+        Handle action_atom = atomspace->add_node(CONCEPT_NODE, "TestAction");
+        Handle next_state_atom = atomspace->add_node(CONCEPT_NODE, "TestNextState");
+        
+        Experience exp("test_exp", state_atom, action_atom, next_state_atom, 0.5, true, 12345);
+        
+        TS_ASSERT(manager->addExperience(exp));
+        TS_ASSERT_EQUALS(manager->getExperienceCount(), 1);
+        
+        auto retrieved = manager->getExperience("test_exp");
+        TS_ASSERT(retrieved != nullptr);
+        TS_ASSERT_EQUALS(retrieved->id, "test_exp");
+        TS_ASSERT_EQUALS(retrieved->reward, 0.5);
+        TS_ASSERT_EQUALS(retrieved->terminal, true);
+        TS_ASSERT_EQUALS(retrieved->timestamp, 12345);
+    }
+    
+    void testBufferLimit() {
+        // Add more experiences than buffer limit
+        for (int i = 0; i < 15; ++i) {
+            Handle state = atomspace->add_node(CONCEPT_NODE, "State" + std::to_string(i));
+            Handle action = atomspace->add_node(CONCEPT_NODE, "Action" + std::to_string(i));
+            Handle next_state = atomspace->add_node(CONCEPT_NODE, "NextState" + std::to_string(i));
+            
+            manager->addExperience(state, action, next_state, i * 0.1, false);
+        }
+        
+        // Should be limited to buffer size
+        TS_ASSERT_EQUALS(manager->getExperienceCount(), 10);
+    }
+    
+    void testGetRecentExperiences() {
+        // Add some experiences
+        for (int i = 0; i < 5; ++i) {
+            Handle state = atomspace->add_node(CONCEPT_NODE, "RecentState" + std::to_string(i));
+            Handle action = atomspace->add_node(CONCEPT_NODE, "RecentAction" + std::to_string(i));
+            Handle next_state = atomspace->add_node(CONCEPT_NODE, "RecentNextState" + std::to_string(i));
+            
+            manager->addExperience(state, action, next_state, i * 0.2, false);
+        }
+        
+        auto recent = manager->getRecentExperiences(3);
+        TS_ASSERT_EQUALS(recent.size(), 3);
+        
+        // Should get the most recent ones
+        if (recent.size() >= 2) {
+            // Last added should have highest reward (4 * 0.2 = 0.8)
+            TS_ASSERT_EQUALS(recent.back()->reward, 0.8);
+        }
+    }
+    
+    void testSampleExperiences() {
+        // Add some experiences
+        for (int i = 0; i < 8; ++i) {
+            Handle state = atomspace->add_node(CONCEPT_NODE, "SampleState" + std::to_string(i));
+            Handle action = atomspace->add_node(CONCEPT_NODE, "SampleAction" + std::to_string(i));
+            Handle next_state = atomspace->add_node(CONCEPT_NODE, "SampleNextState" + std::to_string(i));
+            
+            manager->addExperience(state, action, next_state, i * 0.1, false);
+        }
+        
+        // Test uniform sampling
+        auto sampled = manager->sampleExperiences(5, false);
+        TS_ASSERT_EQUALS(sampled.size(), 5);
+        
+        // Test prioritized sampling (should work even if not fully implemented)
+        auto prioritized = manager->sampleExperiences(3, true);
+        TS_ASSERT_EQUALS(prioritized.size(), 3);
+    }
+    
+    void testGetExperiencesByRewardRange() {
+        // Add experiences with different rewards
+        for (int i = 0; i < 5; ++i) {
+            Handle state = atomspace->add_node(CONCEPT_NODE, "RewardState" + std::to_string(i));
+            Handle action = atomspace->add_node(CONCEPT_NODE, "RewardAction" + std::to_string(i));
+            Handle next_state = atomspace->add_node(CONCEPT_NODE, "RewardNextState" + std::to_string(i));
+            
+            double reward = i * 0.25; // 0.0, 0.25, 0.5, 0.75, 1.0
+            manager->addExperience(state, action, next_state, reward, false);
+        }
+        
+        // Get experiences with reward between 0.3 and 0.8
+        auto filtered = manager->getExperiencesByRewardRange(0.3, 0.8);
+        
+        // Should get experiences with rewards 0.5 and 0.75
+        TS_ASSERT_EQUALS(filtered.size(), 2);
+        
+        for (const auto& exp : filtered) {
+            TS_ASSERT(exp->reward >= 0.3 && exp->reward <= 0.8);
+        }
+    }
+    
+    void testGetExperiencesByState() {
+        Handle target_state = atomspace->add_node(CONCEPT_NODE, "TargetState");
+        Handle action1 = atomspace->add_node(CONCEPT_NODE, "Action1");
+        Handle action2 = atomspace->add_node(CONCEPT_NODE, "Action2");
+        Handle other_state = atomspace->add_node(CONCEPT_NODE, "OtherState");
+        
+        // Add experiences involving target_state as current state
+        manager->addExperience(target_state, action1, other_state, 1.0, false);
+        manager->addExperience(target_state, action2, other_state, 0.5, false);
+        
+        // Add experience with target_state as next_state
+        manager->addExperience(other_state, action1, target_state, 0.8, false);
+        
+        // Add unrelated experience
+        manager->addExperience(other_state, action2, other_state, 0.3, false);
+        
+        // Get experiences involving target_state
+        auto experiences = manager->getExperiencesByState(target_state, true);
+        
+        // Should get 3 experiences (2 as current state, 1 as next state)
+        TS_ASSERT_EQUALS(experiences.size(), 3);
+    }
+    
+    void testExperienceStats() {
+        // Add some experiences
+        for (int i = 0; i < 3; ++i) {
+            Handle state = atomspace->add_node(CONCEPT_NODE, "StatsState" + std::to_string(i));
+            Handle action = atomspace->add_node(CONCEPT_NODE, "StatsAction" + std::to_string(i));
+            Handle next_state = atomspace->add_node(CONCEPT_NODE, "StatsNextState" + std::to_string(i));
+            
+            manager->addExperience(state, action, next_state, i * 0.5, false);
+        }
+        
+        auto stats = manager->getExperienceStats();
+        
+        TS_ASSERT(stats.find("total_experiences") != stats.end());
+        TS_ASSERT(stats.find("current_buffer_size") != stats.end());
+        TS_ASSERT(stats.find("buffer_size_limit") != stats.end());
+        TS_ASSERT(stats.find("total_reward") != stats.end());
+        TS_ASSERT(stats.find("average_reward") != stats.end());
+        
+        TS_ASSERT_EQUALS(stats["current_buffer_size"], 3.0);
+        TS_ASSERT_EQUALS(stats["buffer_size_limit"], 10.0);
+    }
+    
+    void testRewardStats() {
+        // Add experiences with known rewards
+        double rewards[] = {0.1, 0.5, 0.3, 0.9, 0.7};
+        
+        for (int i = 0; i < 5; ++i) {
+            Handle state = atomspace->add_node(CONCEPT_NODE, "RewardStatsState" + std::to_string(i));
+            Handle action = atomspace->add_node(CONCEPT_NODE, "RewardStatsAction" + std::to_string(i));
+            Handle next_state = atomspace->add_node(CONCEPT_NODE, "RewardStatsNextState" + std::to_string(i));
+            
+            manager->addExperience(state, action, next_state, rewards[i], false);
+        }
+        
+        auto reward_stats = manager->getRewardStats();
+        
+        TS_ASSERT(reward_stats.find("min") != reward_stats.end());
+        TS_ASSERT(reward_stats.find("max") != reward_stats.end());
+        TS_ASSERT(reward_stats.find("mean") != reward_stats.end());
+        TS_ASSERT(reward_stats.find("std_dev") != reward_stats.end());
+        
+        TS_ASSERT_EQUALS(reward_stats["min"], 0.1);
+        TS_ASSERT_EQUALS(reward_stats["max"], 0.9);
+        TS_ASSERT_DELTA(reward_stats["mean"], 0.5, 0.01); // Mean of [0.1, 0.3, 0.5, 0.7, 0.9] = 0.5
+    }
+    
+    void testClearMemory() {
+        // Add some experiences
+        for (int i = 0; i < 5; ++i) {
+            Handle state = atomspace->add_node(CONCEPT_NODE, "ClearState" + std::to_string(i));
+            Handle action = atomspace->add_node(CONCEPT_NODE, "ClearAction" + std::to_string(i));
+            Handle next_state = atomspace->add_node(CONCEPT_NODE, "ClearNextState" + std::to_string(i));
+            
+            manager->addExperience(state, action, next_state, i * 0.1, false);
+        }
+        
+        TS_ASSERT_EQUALS(manager->getExperienceCount(), 5);
+        
+        manager->clearMemory();
+        
+        TS_ASSERT_EQUALS(manager->getExperienceCount(), 0);
+    }
+};

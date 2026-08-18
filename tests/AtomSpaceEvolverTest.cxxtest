@@ -1,0 +1,102 @@
+/**
+ * AtomSpaceEvolverTest.cxxtest
+ *
+ * Unit tests for AtomSpaceEvolver
+ * Part of Agent-Zero Learning & Adaptation Phase 5
+ *
+ * Copyright (C) 2024 OpenCog Foundation
+ */
+
+#include <cxxtest/TestSuite.h>
+
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/atoms/atom_types/atom_types.h>
+#include <opencog/util/Logger.h>
+
+#include "agentzero-learning/AtomSpaceEvolver.h"
+
+using namespace opencog;
+using namespace opencog::agentzero;
+
+class AtomSpaceEvolverTest : public CxxTest::TestSuite
+{
+private:
+    AtomSpacePtr _atomspace;
+    std::unique_ptr<AtomSpaceEvolver> _evolver;
+
+public:
+    void setUp()
+    {
+        logger().set_level(Logger::DEBUG);
+        logger().set_print_to_stdout_flag(true);
+        
+        _atomspace = std::make_shared<AtomSpace>();
+        _evolver = std::make_unique<AtomSpaceEvolver>(_atomspace);
+    }
+
+    void tearDown()
+    {
+        _evolver.reset();
+        _atomspace.reset();
+    }
+
+    void test_initialization()
+    {
+        TS_ASSERT(_evolver->initialize());
+    }
+
+    void test_create_initial_population()
+    {
+        TS_ASSERT(_evolver->initialize());
+        
+        Handle template_program = _atomspace->add_node(CONCEPT_NODE, "template");
+        EvolutionParams params;
+        params.population_size = 10;
+        
+        auto population = _evolver->createInitialPopulation(template_program, 10, params);
+        
+        TS_ASSERT_EQUALS(population.size(), 10);
+        TS_ASSERT(population[0].program_atom != Handle::UNDEFINED);
+    }
+
+    void test_evolve()
+    {
+        TS_ASSERT(_evolver->initialize());
+        
+        Handle initial_program = _atomspace->add_node(CONCEPT_NODE, "initial");
+        
+        auto fitness_fn = [](const Handle& program) -> double {
+            return 0.7; // Simple fitness
+        };
+        
+        EvolutionParams params;
+        params.max_generations = 5;
+        params.population_size = 10;
+        
+        Handle result = _evolver->evolve(initial_program, fitness_fn, params);
+        TS_ASSERT(result != Handle::UNDEFINED);
+    }
+
+    void test_program_validation()
+    {
+        TS_ASSERT(_evolver->initialize());
+        
+        Handle valid_program = _atomspace->add_node(CONCEPT_NODE, "valid");
+        EvolutionParams params;
+        
+        TS_ASSERT(_evolver->validateProgram(valid_program, params));
+        TS_ASSERT(!_evolver->validateProgram(Handle::UNDEFINED, params));
+    }
+
+    void test_statistics()
+    {
+        TS_ASSERT(_evolver->initialize());
+        
+        auto stats = _evolver->getEvolutionStats();
+        TS_ASSERT(stats.empty()); // Should be empty initially
+        
+        _evolver->resetStats();
+        stats = _evolver->getEvolutionStats();
+        TS_ASSERT(stats.empty());
+    }
+};
