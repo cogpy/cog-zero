@@ -334,6 +334,9 @@ TEST(fuzz_remove_link_clears_incoming) {
         std::uniform_int_distribution<int> idxDist(0, nn - 1);
         int a = idxDist(rng);
         int b = idxDist(rng);
+        // Prefer distinct endpoints; self-links are covered by other tests.
+        if (a == b)
+            b = (b + 1) % nn;
         auto lnk = store.addLink(AtomType::INHERITANCE, {nodes[static_cast<size_t>(a)],
                                                          nodes[static_cast<size_t>(b)]});
         store.remove(lnk);
@@ -407,7 +410,9 @@ TEST(fuzz_save_load_round_trip) {
 
 TEST(fuzz_get_by_type_homogeneous) {
     std::mt19937 rng(0x77777777);
-    static const AtomType kAllTypes[] = {
+    // Query types include both node and link kinds; only node kinds are inserted
+    // via addNode (kNodeTypes). Links are added separately below.
+    static const AtomType kQueryTypes[] = {
         AtomType::CONCEPT, AtomType::PREDICATE, AtomType::VARIABLE,
         AtomType::CUSTOM, AtomType::INHERITANCE, AtomType::SIMILARITY,
     };
@@ -426,7 +431,7 @@ TEST(fuzz_get_by_type_homogeneous) {
             store.addLink(AtomType::INHERITANCE, {nodes[0], nodes[1]});
             store.addLink(AtomType::SIMILARITY,  {nodes[0], nodes[1]});
         }
-        for (AtomType t : kAllTypes) {
+        for (AtomType t : kQueryTypes) {
             for (const auto& h : store.getByType(t)) {
                 ASSERT_EQ(h->type(), t);
             }

@@ -65,7 +65,10 @@ jobs:
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install ninja || true
+          if ! command -v ninja >/dev/null 2>&1; then
+            brew install ninja
+          fi
+          ninja --version
 
       - name: Set up MSVC environment (Windows)
         if: runner.os == 'Windows'
