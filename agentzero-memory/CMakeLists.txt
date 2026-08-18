@@ -1,79 +1,132 @@
 # agentzero-memory/CMakeLists.txt
 # Agent-Zero Memory & Context Management — Phase 7
-# Part of the AGENT-ZERO-GENESIS project (AZ-CONTEXT-001)
+# Part of the AGENT-ZERO-GENESIS project (AZ-MEM-001..003, AZ-CONTEXT-001)
+#
+# Builds against real OpenCog (cogutil/atomspace) when available.
+# Otherwise uses the in-tree AtomSpace shim from agentzero-core so the
+# module and its tests can still be built and exercised under CTest.
+# Optional attention / atomspace-rocks packages enable HAVE_* flags.
 
 cmake_minimum_required(VERSION 3.16)
 
-project(AgentZeroMemory
-    VERSION 0.1.0
-    DESCRIPTION "Agent-Zero Memory & Context Management Module"
-    LANGUAGES CXX
-)
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-find_package(PkgConfig REQUIRED)
-
-pkg_check_modules(COGUTIL cogutil)
-if(NOT COGUTIL_FOUND)
-    message(WARNING "cogutil not found — agentzero-memory will not be built")
-    return()
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    project(AgentZeroMemory
+        VERSION 0.1.0
+        DESCRIPTION "Agent-Zero Memory & Context Management Module"
+        LANGUAGES CXX
+    )
+    set(AGENTZERO_MEMORY_STANDALONE_BUILD TRUE)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    get_filename_component(COGZERO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+else()
+    set(AGENTZERO_MEMORY_STANDALONE_BUILD FALSE)
+    set(COGZERO_ROOT "${CMAKE_SOURCE_DIR}")
 endif()
 
-pkg_check_modules(ATOMSPACE atomspace)
-if(NOT ATOMSPACE_FOUND)
-    message(WARNING "atomspace not found — agentzero-memory will not be built")
-    return()
+option(AGENTZERO_MEMORY_USE_SHIM "Force use of in-tree AtomSpace shim" OFF)
+
+find_package(Threads REQUIRED)
+find_package(PkgConfig QUIET)
+
+set(AGENTZERO_MEMORY_HAVE_OPENCOG FALSE)
+
+if(NOT AGENTZERO_MEMORY_USE_SHIM AND PkgConfig_FOUND)
+    pkg_check_modules(COGUTIL cogutil)
+    pkg_check_modules(ATOMSPACE atomspace)
+    if(COGUTIL_FOUND AND ATOMSPACE_FOUND)
+        set(AGENTZERO_MEMORY_HAVE_OPENCOG TRUE)
+    endif()
 endif()
 
-pkg_check_modules(ATTENTION attention)
-pkg_check_modules(ATOMSPACE_ROCKS atomspace-rocks)
+set(AGENTZERO_MEMORY_HAVE_ATTENTION FALSE)
+set(AGENTZERO_MEMORY_HAVE_ROCKS FALSE)
 
-include_directories(
-    ${CMAKE_SOURCE_DIR}/include
-    ${COGUTIL_INCLUDE_DIRS}
-    ${ATOMSPACE_INCLUDE_DIRS}
-)
+if(AGENTZERO_MEMORY_HAVE_OPENCOG AND PkgConfig_FOUND)
+    pkg_check_modules(ATTENTION attention)
+    pkg_check_modules(ATOMSPACE_ROCKS atomspace-rocks)
+    if(ATTENTION_FOUND)
+        set(AGENTZERO_MEMORY_HAVE_ATTENTION TRUE)
+    endif()
+    if(ATOMSPACE_ROCKS_FOUND)
+        set(AGENTZERO_MEMORY_HAVE_ROCKS TRUE)
+    endif()
+endif()
 
-link_directories(
-    ${COGUTIL_LIBRARY_DIRS}
-    ${ATOMSPACE_LIBRARY_DIRS}
-)
+if(NOT AGENTZERO_MEMORY_HAVE_OPENCOG)
+    message(STATUS "agentzero-memory: OpenCog not found — building with in-tree AtomSpace shim")
+    set(AGENTZERO_MEMORY_USE_SHIM TRUE)
+endif()
 
 set(AGENTZERO_MEMORY_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/LongTermMemory.cpp
-    ${CMAKE_SOURCE_DIR}/src/EpisodicMemory.cpp
-    ${CMAKE_SOURCE_DIR}/src/WorkingMemory.cpp
-    ${CMAKE_SOURCE_DIR}/src/ContextManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/EpisodicMemory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/WorkingMemory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/LongTermMemory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ContextManager.cpp
 )
 
 add_library(agentzero-memory SHARED ${AGENTZERO_MEMORY_SOURCES})
 
-target_include_directories(agentzero-memory PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-)
-
-target_link_libraries(agentzero-memory
-    ${COGUTIL_LIBRARIES}
-    ${ATOMSPACE_LIBRARIES}
-)
-
-if(ATTENTION_FOUND)
-    target_link_libraries(agentzero-memory ${ATTENTION_LIBRARIES})
-    target_compile_definitions(agentzero-memory PRIVATE HAVE_ATTENTION)
+# Shim must precede monorepo include/ so partial stubs do not win.
+if(AGENTZERO_MEMORY_USE_SHIM)
+    set(AGENTZERO_SHIM_DIR "${COGZERO_ROOT}/agentzero-core/shim")
+    target_include_directories(agentzero-memory
+        PUBLIC
+            $<BUILD_INTERFACE:${AGENTZERO_SHIM_DIR}>
+            $<BUILD_INTERFACE:${COGZERO_ROOT}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+    target_compile_definitions(agentzero-memory PUBLIC AGENTZERO_MEMORY_SHIM=1)
+else()
+    target_include_directories(agentzero-memory
+        PUBLIC
+            $<BUILD_INTERFACE:${COGZERO_ROOT}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+    target_include_directories(agentzero-memory
+        PUBLIC
+            ${COGUTIL_INCLUDE_DIRS}
+            ${ATOMSPACE_INCLUDE_DIRS}
+    )
+    target_link_directories(agentzero-memory
+        PUBLIC
+            ${COGUTIL_LIBRARY_DIRS}
+            ${ATOMSPACE_LIBRARY_DIRS}
+    )
+    target_link_libraries(agentzero-memory
+        PUBLIC
+            ${COGUTIL_LIBRARIES}
+            ${ATOMSPACE_LIBRARIES}
+    )
 endif()
 
-if(ATOMSPACE_ROCKS_FOUND)
-    target_link_libraries(agentzero-memory ${ATOMSPACE_ROCKS_LIBRARIES})
-    target_compile_definitions(agentzero-memory PRIVATE HAVE_ATOMSPACE_ROCKS)
+target_link_libraries(agentzero-memory PUBLIC Threads::Threads)
+
+if(AGENTZERO_MEMORY_HAVE_ATTENTION)
+    target_include_directories(agentzero-memory PUBLIC ${ATTENTION_INCLUDE_DIRS})
+    target_link_directories(agentzero-memory PUBLIC ${ATTENTION_LIBRARY_DIRS})
+    target_link_libraries(agentzero-memory PUBLIC ${ATTENTION_LIBRARIES})
+    target_compile_definitions(agentzero-memory PRIVATE HAVE_ATTENTION=1 HAVE_ATTENTION_BANK=1)
+    message(STATUS "  WorkingMemory: attention bank enabled")
+else()
+    message(STATUS "  WorkingMemory: attention bank unavailable (optional)")
+endif()
+
+if(AGENTZERO_MEMORY_HAVE_ROCKS)
+    target_include_directories(agentzero-memory PUBLIC ${ATOMSPACE_ROCKS_INCLUDE_DIRS})
+    target_link_directories(agentzero-memory PUBLIC ${ATOMSPACE_ROCKS_LIBRARY_DIRS})
+    target_link_libraries(agentzero-memory PUBLIC ${ATOMSPACE_ROCKS_LIBRARIES})
+    target_compile_definitions(agentzero-memory PRIVATE HAVE_ATOMSPACE_ROCKS=1)
+    message(STATUS "  LongTermMemory: atomspace-rocks persistence enabled")
+else()
+    message(STATUS "  LongTermMemory: in-memory persistence fallback (atomspace-rocks not found)")
 endif()
 
 set_target_properties(agentzero-memory PROPERTIES
-    VERSION ${PROJECT_VERSION}
+    VERSION 0.1.0
     SOVERSION 1
     OUTPUT_NAME "agentzero-memory"
+    POSITION_INDEPENDENT_CODE ON
 )
 
 include(GNUInstallDirs)
@@ -82,4 +135,12 @@ install(TARGETS agentzero-memory
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
-message(STATUS "agentzero-memory configured (attention: ${ATTENTION_FOUND})")
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+if(BUILD_TESTING OR AGENTZERO_MEMORY_STANDALONE_BUILD)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+message(STATUS "agentzero-memory configured (shim=${AGENTZERO_MEMORY_USE_SHIM}, attention=${AGENTZERO_MEMORY_HAVE_ATTENTION}, rocks=${AGENTZERO_MEMORY_HAVE_ROCKS})")

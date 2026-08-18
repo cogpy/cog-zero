@@ -29,8 +29,9 @@ namespace memory {
 // Forward declarations
 class LongTermMemory;
 class EpisodicMemory;
-class WorkingMemory;
 class ContextManager;
+// Note: WorkingMemory lives in opencog::agentzero (not ::memory)
+
 
 // Type aliases for convenience
 using AtomSpacePtr = std::shared_ptr<AtomSpace>;
@@ -49,6 +50,20 @@ enum class MemoryImportance {
     MINIMAL = 10       // Temporary data, low-value information
 };
 
+inline bool operator>=(MemoryImportance a, MemoryImportance b) {
+    return static_cast<int>(a) >= static_cast<int>(b);
+}
+inline bool operator<=(MemoryImportance a, MemoryImportance b) {
+    return static_cast<int>(a) <= static_cast<int>(b);
+}
+inline bool operator>(MemoryImportance a, MemoryImportance b) {
+    return static_cast<int>(a) > static_cast<int>(b);
+}
+inline bool operator<(MemoryImportance a, MemoryImportance b) {
+    return static_cast<int>(a) < static_cast<int>(b);
+}
+
+
 /**
  * Memory persistence levels
  */
@@ -59,6 +74,31 @@ enum class PersistenceLevel {
     SHORT_TERM,        // In memory only, cleared on restart
     TEMPORARY          // Cleared automatically after timeout
 };
+
+// Persistence rank: PERMANENT is most durable.
+inline int persistence_rank(PersistenceLevel p) {
+    switch (p) {
+        case PersistenceLevel::PERMANENT: return 4;
+        case PersistenceLevel::LONG_TERM: return 3;
+        case PersistenceLevel::MEDIUM_TERM: return 2;
+        case PersistenceLevel::SHORT_TERM: return 1;
+        case PersistenceLevel::TEMPORARY: return 0;
+    }
+    return 0;
+}
+inline bool operator>=(PersistenceLevel a, PersistenceLevel b) {
+    return persistence_rank(a) >= persistence_rank(b);
+}
+inline bool operator<=(PersistenceLevel a, PersistenceLevel b) {
+    return persistence_rank(a) <= persistence_rank(b);
+}
+inline bool operator>(PersistenceLevel a, PersistenceLevel b) {
+    return persistence_rank(a) > persistence_rank(b);
+}
+inline bool operator<(PersistenceLevel a, PersistenceLevel b) {
+    return persistence_rank(a) < persistence_rank(b);
+}
+
 
 /**
  * Memory access patterns for optimization
