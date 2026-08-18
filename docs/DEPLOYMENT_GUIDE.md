@@ -618,6 +618,54 @@ sudo sysctl -p
 9. ✅ **Test Updates** in staging first
 10. ✅ **Document Changes** in change log
 
+## Phase 9 — Validation Before Deploy
+
+Run the full-system suite (all modules + standalone + Python bridge) before promoting a build:
+
+```bash
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_TESTING=ON -DBUILD_STANDALONE=ON -DBUILD_OPENCOG_MODULES=OFF
+cmake --build build-release -j
+cd build-release
+
+# Module + standalone unit/e2e/integration
+ctest --output-on-failure --parallel
+
+# Phase 9 labels
+ctest --label-regex 'phase9' --output-on-failure
+ctest --label-regex 'benchmark' --output-on-failure
+ctest --label-regex 'regression' --output-on-failure
+```
+
+### Python bridge deployment
+
+```bash
+# Shared library
+cmake --build build-release --target cog0_capi
+sudo cmake --install build-release --component cog0_capi   # or copy libcog0_capi.so
+
+# Runtime env for applications
+export COG0_CAPI_LIB=/usr/local/lib/libcog0_capi.so
+export PYTHONPATH=/path/to/cog-zero/agentzero-python-bridge:$PYTHONPATH
+
+python3 - <<'PY'
+from cog0 import Agent
+with Agent("prod") as a:
+    a.set_goal("health", "health-check", 1.0)
+    a.run_cycles(1)
+    print(a.status_report())
+PY
+```
+
+Performance gate (Phase 9): routine decisions must complete in **&lt; 100 ms** on target hardware
+(`agentzero_system_benchmarks` and standalone `cog0_benchmarks`).
+
+See also:
+
+- [`agentzero-integration/README.md`](../agentzero-integration/README.md)
+- [`agentzero-python-bridge/README.md`](../agentzero-python-bridge/README.md)
+- [`docs/DEPLOYMENT.md`](DEPLOYMENT.md) — standalone cog0 CLI deployment
+
 ---
 
 *Part of the AGENT-ZERO-GENESIS documentation - Phase 9: Integration & Testing (AZ-DOC-001)*
