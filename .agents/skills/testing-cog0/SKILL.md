@@ -17,11 +17,13 @@ The binary is at `standalone/build/cog0`.
 cd standalone/build
 ctest -V
 ```
-This runs 4 test suites:
-- **Unit tests** (~147 tests): AtomStore, TaskManager, ReasoningEngine, CognitiveLoop
-- **E2E tests** (~14 tests): Full agent scenarios filtered by `--filter e2e`
-- **Integration tests** (~12 tests): Multi-subsystem cooperation filtered by `--filter integration`
-- **Benchmarks** (~19 benchmarks): Performance measurements
+This runs the full suite:
+- **Unit tests**: AtomStore, TaskManager, ReasoningEngine, CognitiveLoop, …
+- **E2E tests**: Full agent scenarios (`ctest -L e2e`)
+- **Integration tests**: Multi-subsystem cooperation (`ctest -L integration`)
+- **Property-based (fuzz) tests**: AtomStore + ReasoningEngine invariants (`ctest -L fuzz`)
+- **Benchmarks**: Latency budgets + microbenchmarks (`ctest -R benchmark`)
+- **Regression / CLI smoke**: `ctest -L regression` and `ctest -L cli`
 
 All tests should pass with 0 failures. Total runtime is ~3-5 seconds.
 

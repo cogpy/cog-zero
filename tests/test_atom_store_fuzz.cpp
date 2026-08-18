@@ -13,13 +13,22 @@
 #include "test_runner.h"
 #include "cog0/AtomStore.h"
 
+#include <algorithm>
+#include <cstdio>
 #include <random>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 using namespace cog0;
+
+// Write snapshots under the CTest working directory for cross-platform compat
+// (same approach as tests/test_persistence.cpp).
+static std::string fuzzSnapPath(int trial) {
+    return "cog0_fuzz_snap_" + std::to_string(trial) + ".snap";
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -276,5 +285,156 @@ TEST(fuzz_attention_values_round_trip) {
         h->setLTI(lti);
         ASSERT_EQ(h->sti(), sti);
         ASSERT_EQ(h->lti(), lti);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Property: getLink returns the same handle as addLink for identical outgoing.
+
+TEST(fuzz_get_link_matches_add_link) {
+    std::mt19937 rng(0xA11CE001);
+    std::uniform_int_distribution<int> nodeCount(2, 8);
+    std::uniform_int_distribution<int> linkCount(1, 12);
+
+    for (int trial = 0; trial < 80; ++trial) {
+        AtomStore store;
+        int nn = nodeCount(rng);
+        std::vector<Handle> nodes;
+        nodes.reserve(static_cast<size_t>(nn));
+        for (int i = 0; i < nn; ++i)
+            nodes.push_back(store.addNode(AtomType::CONCEPT, "g" + std::to_string(i)));
+
+        std::uniform_int_distribution<int> idxDist(0, nn - 1);
+        int nl = linkCount(rng);
+        for (int i = 0; i < nl; ++i) {
+            Handle a = nodes[static_cast<size_t>(idxDist(rng))];
+            Handle b = nodes[static_cast<size_t>(idxDist(rng))];
+            auto added = store.addLink(AtomType::SIMILARITY, {a, b});
+            auto got   = store.getLink(AtomType::SIMILARITY, {a, b});
+            ASSERT_EQ(added, got);
+            ASSERT_TRUE(got != nullptr);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Property: removing a link removes it from both endpoints' incoming sets.
+
+TEST(fuzz_remove_link_clears_incoming) {
+    std::mt19937 rng(0xBEEFCAFE);
+    std::uniform_int_distribution<int> nodeCount(3, 10);
+
+    for (int trial = 0; trial < 60; ++trial) {
+        AtomStore store;
+        int nn = nodeCount(rng);
+        std::vector<Handle> nodes;
+        for (int i = 0; i < nn; ++i)
+            nodes.push_back(store.addNode(AtomType::CONCEPT, "r" + std::to_string(i)));
+
+        std::uniform_int_distribution<int> idxDist(0, nn - 1);
+        int a = idxDist(rng);
+        int b = idxDist(rng);
+        // Prefer distinct endpoints; self-links are covered by other tests.
+        if (a == b)
+            b = (b + 1) % nn;
+        auto lnk = store.addLink(AtomType::INHERITANCE, {nodes[static_cast<size_t>(a)],
+                                                         nodes[static_cast<size_t>(b)]});
+        store.remove(lnk);
+
+        auto incA = store.getIncoming(nodes[static_cast<size_t>(a)]);
+        auto incB = store.getIncoming(nodes[static_cast<size_t>(b)]);
+        bool foundA = std::find(incA.begin(), incA.end(), lnk) != incA.end();
+        bool foundB = std::find(incB.begin(), incB.end(), lnk) != incB.end();
+        ASSERT_FALSE(foundA);
+        ASSERT_FALSE(foundB);
+        ASSERT_EQ(store.getLink(AtomType::INHERITANCE,
+                                {nodes[static_cast<size_t>(a)],
+                                 nodes[static_cast<size_t>(b)]}),
+                  nullptr);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Property: save/load round-trip preserves size and node identity/TV.
+
+TEST(fuzz_save_load_round_trip) {
+    std::mt19937 rng(0x50505050);
+    std::uniform_int_distribution<int> countDist(1, 25);
+    std::uniform_real_distribution<double> vDist(0.0, 1.0);
+
+    for (int trial = 0; trial < 40; ++trial) {
+        AtomStore store;
+        int n = countDist(rng);
+        std::vector<std::pair<std::string, TruthValue>> expected;
+        expected.reserve(static_cast<size_t>(n));
+        for (int i = 0; i < n; ++i) {
+            std::string name = "snap_" + std::to_string(trial) + "_" + std::to_string(i);
+            auto h = store.addNode(AtomType::CONCEPT, name);
+            TruthValue tv{vDist(rng), vDist(rng)};
+            h->setTV(tv);
+            expected.emplace_back(name, tv);
+        }
+        // Add a few links so the snapshot is non-trivial
+        if (n >= 2) {
+            auto a = store.getNode(AtomType::CONCEPT, expected[0].first);
+            auto b = store.getNode(AtomType::CONCEPT, expected[1].first);
+            store.addLink(AtomType::INHERITANCE, {a, b})->setTV(TruthValue{0.9, 0.8});
+        }
+
+        const std::string path = fuzzSnapPath(trial);
+        std::remove(path.c_str());
+
+        ASSERT_TRUE(store.saveToFile(path));
+        size_t before = store.size();
+
+        AtomStore restored;
+        ASSERT_TRUE(restored.loadFromFile(path));
+        ASSERT_EQ(restored.size(), before);
+
+        // Text snapshot uses default ostream precision (~6 digits), so allow
+        // a looser absolute tolerance than in-memory comparisons.
+        constexpr double kTvEps = 1e-5;
+        for (const auto& [name, tv] : expected) {
+            auto h = restored.getNode(AtomType::CONCEPT, name);
+            ASSERT_TRUE(h != nullptr);
+            ASSERT_NEAR(h->tv().strength,   tv.strength,   kTvEps);
+            ASSERT_NEAR(h->tv().confidence, tv.confidence, kTvEps);
+        }
+
+        std::remove(path.c_str());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Property: getByType never returns atoms of a different type.
+
+TEST(fuzz_get_by_type_homogeneous) {
+    std::mt19937 rng(0x77777777);
+    // Query types include both node and link kinds; only node kinds are inserted
+    // via addNode (kNodeTypes). Links are added separately below.
+    static const AtomType kQueryTypes[] = {
+        AtomType::CONCEPT, AtomType::PREDICATE, AtomType::VARIABLE,
+        AtomType::CUSTOM, AtomType::INHERITANCE, AtomType::SIMILARITY,
+    };
+    std::uniform_int_distribution<size_t> nodeTypeDist(0, kNumNodeTypes - 1);
+    std::uniform_int_distribution<int> countDist(5, 30);
+
+    for (int trial = 0; trial < 50; ++trial) {
+        AtomStore store;
+        int n = countDist(rng);
+        std::vector<Handle> nodes;
+        for (int i = 0; i < n; ++i) {
+            AtomType t = kNodeTypes[nodeTypeDist(rng)];
+            nodes.push_back(store.addNode(t, "t" + std::to_string(i)));
+        }
+        if (nodes.size() >= 2) {
+            store.addLink(AtomType::INHERITANCE, {nodes[0], nodes[1]});
+            store.addLink(AtomType::SIMILARITY,  {nodes[0], nodes[1]});
+        }
+        for (AtomType t : kQueryTypes) {
+            for (const auto& h : store.getByType(t)) {
+                ASSERT_EQ(h->type(), t);
+            }
+        }
     }
 }

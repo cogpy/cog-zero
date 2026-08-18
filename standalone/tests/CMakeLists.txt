@@ -81,6 +81,7 @@ endif()
 
 if(EXISTS "${COG0_TEST_SRC}/test_benchmarks.cpp")
     # test_benchmarks.cpp uses test_runner.h (latency assertions via TEST macros)
+    # Registered so both `ctest -R benchmark` and `ctest -L benchmark` select it.
     add_executable(cog0_benchmarks
         ${COG0_TEST_SRC}/test_main.cpp
         ${COG0_TEST_SRC}/test_benchmarks.cpp
@@ -88,11 +89,15 @@ if(EXISTS "${COG0_TEST_SRC}/test_benchmarks.cpp")
     target_link_libraries(cog0_benchmarks PRIVATE cog0lib)
     target_include_directories(cog0_benchmarks PRIVATE "${COG0_TEST_SRC}")
     add_test(NAME cog0_benchmarks COMMAND cog0_benchmarks)
-    set_tests_properties(cog0_benchmarks PROPERTIES LABELS "benchmark")
+    set_tests_properties(cog0_benchmarks PROPERTIES
+        LABELS "benchmark"
+        TIMEOUT 120
+    )
 endif()
 
 # bench_atom_store / bench_reasoning_engine use the separate bench_runner.h
-# framework (BENCHMARK_N macros, bench_main.cpp entry point)
+# framework (BENCHMARK_N macros, bench_main.cpp entry point).
+# Name contains "benchmark" so `ctest -R benchmark` picks it up (issue #13).
 if(EXISTS "${COG0_TEST_SRC}/bench_atom_store.cpp")
     add_executable(cog0_microbenchmarks
         ${COG0_TEST_SRC}/bench_main.cpp
@@ -102,7 +107,10 @@ if(EXISTS "${COG0_TEST_SRC}/bench_atom_store.cpp")
     target_link_libraries(cog0_microbenchmarks PRIVATE cog0lib)
     target_include_directories(cog0_microbenchmarks PRIVATE "${COG0_TEST_SRC}")
     add_test(NAME cog0_microbenchmarks COMMAND cog0_microbenchmarks)
-    set_tests_properties(cog0_microbenchmarks PROPERTIES LABELS "benchmark")
+    set_tests_properties(cog0_microbenchmarks PROPERTIES
+        LABELS "benchmark"
+        TIMEOUT 120
+    )
 endif()
 
 # -----------------------------------------------------------------------
