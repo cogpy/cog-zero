@@ -26,7 +26,6 @@
 #  endif
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
-#  pragma comment(lib, "Ws2_32.lib")
 #  define CLOSE_SOCKET closesocket
 #  ifndef MSG_NOSIGNAL
 #    define MSG_NOSIGNAL 0
@@ -42,9 +41,6 @@ using SocketIoResult = int;
 #  include <sys/socket.h>
 #  include <unistd.h>
 #  define CLOSE_SOCKET ::close
-#  ifndef INVALID_SOCKET
-#    define INVALID_SOCKET (-1)
-#  endif
 using SocketIoResult = ssize_t;
 #endif
 
@@ -117,8 +113,10 @@ bool GrpcAgentServer::start()
     }
 #endif
 
+    // Keep fd as int to match existing API/headers (same pattern as MonitoringServer).
+    // On Windows, INVALID_SOCKET casts to -1 when stored in int.
     _serverFd = static_cast<int>(::socket(AF_INET, SOCK_STREAM, 0));
-    if (_serverFd < 0 || _serverFd == static_cast<int>(INVALID_SOCKET)) {
+    if (_serverFd < 0) {
         _running = false;
         logger().error("GrpcAgentServer: socket() failed");
         return false;
