@@ -11,6 +11,7 @@
 #include <sstream>
 #include <random>
 #include <algorithm>
+#include <climits>
 
 using namespace opencog;
 using namespace opencog::agentzero;

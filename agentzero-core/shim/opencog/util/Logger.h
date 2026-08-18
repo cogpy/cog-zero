@@ -21,7 +21,7 @@ public:
 
     class LogStream {
     public:
-        LogStream(Logger& logger, Level level)
+        LogStream(const Logger& logger, Level level)
             : _logger(logger), _level(level), _active(level <= logger.get_level()) {}
 
         ~LogStream() {
@@ -41,13 +41,15 @@ public:
         }
 
     private:
-        Logger& _logger;
+        const Logger& _logger;
         Level _level;
         bool _active;
         std::ostringstream _ss;
     };
 
     Logger() = default;
+    // Named logger used by distributed / scale-out modules (name is advisory only).
+    explicit Logger(const std::string&) : Logger() {}
 
     void set_level(Level l) { _level = l; }
     Level get_level() const { return _level; }
@@ -56,37 +58,37 @@ public:
     void set_print_to_stdout_flag(bool v) { _to_stdout = v; }
 
     // Streaming API: logger().info() << "msg"
-    LogStream error() { return LogStream(*this, ERROR); }
-    LogStream warn()  { return LogStream(*this, WARN); }
-    LogStream info()  { return LogStream(*this, INFO); }
-    LogStream debug() { return LogStream(*this, DEBUG); }
-    LogStream fine()  { return LogStream(*this, FINE); }
+    LogStream error() const { return LogStream(*this, ERROR); }
+    LogStream warn()  const { return LogStream(*this, WARN); }
+    LogStream info()  const { return LogStream(*this, INFO); }
+    LogStream debug() const { return LogStream(*this, DEBUG); }
+    LogStream fine()  const { return LogStream(*this, FINE); }
 
     // String API: logger().info("msg")
-    void error(const std::string& msg) { emit(ERROR, msg); }
-    void warn(const std::string& msg)  { emit(WARN, msg); }
-    void info(const std::string& msg)  { emit(INFO, msg); }
-    void debug(const std::string& msg) { emit(DEBUG, msg); }
-    void fine(const std::string& msg)  { emit(FINE, msg); }
+    void error(const std::string& msg) const { emit(ERROR, msg); }
+    void warn(const std::string& msg)  const { emit(WARN, msg); }
+    void info(const std::string& msg)  const { emit(INFO, msg); }
+    void debug(const std::string& msg) const { emit(DEBUG, msg); }
+    void fine(const std::string& msg)  const { emit(FINE, msg); }
 
     // Printf-style API matching real OpenCog logger: logger().info("x=%d", n)
-    void error(const char* fmt, ...) {
+    void error(const char* fmt, ...) const {
         va_list ap; va_start(ap, fmt); emitf(ERROR, fmt, ap); va_end(ap);
     }
-    void warn(const char* fmt, ...) {
+    void warn(const char* fmt, ...) const {
         va_list ap; va_start(ap, fmt); emitf(WARN, fmt, ap); va_end(ap);
     }
-    void info(const char* fmt, ...) {
+    void info(const char* fmt, ...) const {
         va_list ap; va_start(ap, fmt); emitf(INFO, fmt, ap); va_end(ap);
     }
-    void debug(const char* fmt, ...) {
+    void debug(const char* fmt, ...) const {
         va_list ap; va_start(ap, fmt); emitf(DEBUG, fmt, ap); va_end(ap);
     }
-    void fine(const char* fmt, ...) {
+    void fine(const char* fmt, ...) const {
         va_list ap; va_start(ap, fmt); emitf(FINE, fmt, ap); va_end(ap);
     }
 
-    void emit(Level level, const std::string& msg) {
+    void emit(Level level, const std::string& msg) const {
         if (!_to_stdout || msg.empty()) return;
         if (level > _level) return;
         std::lock_guard<std::mutex> lock(_mu);
@@ -103,7 +105,7 @@ public:
     }
 
 private:
-    void emitf(Level level, const char* fmt, va_list ap) {
+    void emitf(Level level, const char* fmt, va_list ap) const {
         char buf[4096];
         vsnprintf(buf, sizeof(buf), fmt, ap);
         emit(level, std::string(buf));
@@ -111,7 +113,7 @@ private:
 
     Level _level = WARN; // quieter default for tests
     bool _to_stdout = false;
-    std::mutex _mu;
+    mutable std::mutex _mu;
 };
 
 inline Logger& logger() {

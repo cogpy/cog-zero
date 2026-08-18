@@ -16,6 +16,7 @@
 #include <vector>
 #include <map>
 #include <queue>
+#include <mutex>
 
 #include <opencog/atomspace/AtomSpace.h>
 #include <opencog/util/Logger.h>

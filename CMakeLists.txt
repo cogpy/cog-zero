@@ -292,6 +292,8 @@ if(NOT BUILD_OPENCOG_MODULES)
     add_subdirectory(agentzero-memory)
     message(STATUS "Adding agentzero-tools with AtomSpace shim (OpenCog modules disabled)")
     add_subdirectory(agentzero-tools)
+    message(STATUS "Adding agentzero-distributed with AtomSpace shim (OpenCog modules disabled)")
+    add_subdirectory(agentzero-distributed)
 
     # Phase 9: full-system integration / benchmarks / regression (all modules)
     if(NOT TARGET agentzero_system_integration_tests)
