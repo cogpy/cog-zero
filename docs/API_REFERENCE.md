@@ -678,7 +678,68 @@ class NotImplementedException : public AgentZeroException {};
 
 ## Examples
 
-See `agents/cpp/examples/` for complete working examples of all APIs.
+See `examples/` for complete working examples of all APIs.
+
+## Python Bridge API (Phase 9)
+
+The `agentzero-python-bridge/` package exposes the standalone cog0 C API to Python
+via ctypes (always) and optional Cython bindings.
+
+### Install / build
+
+```bash
+cmake -S . -B build -DBUILD_STANDALONE=ON -DBUILD_TESTING=ON
+cmake --build build --target cog0_capi -j
+export COG0_CAPI_LIB=$PWD/build/agentzero-python-bridge/libcog0_capi.so
+export PYTHONPATH=$PWD/agentzero-python-bridge:$PYTHONPATH
+```
+
+### Quick reference
+
+```python
+from cog0 import Agent, version
+
+print(version())  # e.g. "0.3.0"
+
+with Agent(name="demo", cycle_interval_ms=10, max_tasks_per_cycle=8) as agent:
+    agent.set_goal("explore", "Explore the environment", priority=0.9)
+    agent.add_percept("camera", "obstacle-ahead", salience=0.8)
+    agent.add_concept("Fact:sky-is-blue")
+    agent.run_cycles(5)
+
+    assert agent.has_concept("Fact:sky-is-blue")
+    print(agent.status_report())
+    print(agent.cycle_count, agent.atom_count)
+
+    agent.start()   # background cognitive loop
+    agent.stop()
+```
+
+| Method / property | Description |
+|-------------------|-------------|
+| `Agent(name, cycle_interval_ms, max_tasks_per_cycle)` | Create agent |
+| `set_goal(name, description="", priority=0.5)` | Set/replace a goal |
+| `add_percept(source, content, salience=0.5)` | Inject a percept (thread-safe) |
+| `run_cycles(n)` | Run `n` synchronous cognitive cycles |
+| `start()` / `stop()` | Background loop control |
+| `is_running` | Whether background loop is active |
+| `cycle_count` / `atom_count` | Introspection counters |
+| `status_report()` | Human-readable status string |
+| `add_concept(name)` / `has_concept(name)` | AtomStore helpers |
+| `version()` | Library version string |
+
+C header: `include/cog0/cog0_capi.h`  
+Package docs: [`agentzero-python-bridge/README.md`](../agentzero-python-bridge/README.md)
+
+### Full-system integration tests
+
+Cross-module C++ tests live in `agentzero-integration/` and are labelled
+`phase9`, `integration`, `benchmark`, and `regression`:
+
+```bash
+ctest -R agentzero_system --output-on-failure
+ctest --label-regex 'phase9' --output-on-failure
+```
 
 ---
 

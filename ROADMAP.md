@@ -148,11 +148,20 @@ For the high-level architecture specification see [AGENT-ZERO-GENESIS.md](AGENT-
 ## Phase 9 — Integration & End-to-End Testing ✅ Implemented
 
 ### Tasks
-- [x] Full system integration tests (all modules together) — `standalone/tests/test_integration.cpp` (12 tests)
-- [x] Performance benchmarks vs. baseline (< 100 ms routine decisions) — `standalone/tests/test_benchmarks.cpp` (8 benchmarks)
-- [x] Regression baseline establishment — `standalone/tests/test_regression.cpp` (10 baseline tests)
-- [x] Python interoperability bridge (`agentzero-python-bridge/`) — C API (`standalone/include/cog0/cog0_capi.h`) + Cython bindings
-- [x] Documentation pass: API reference (`standalone/docs/API.md`), deployment guide (`standalone/docs/DEPLOYMENT.md`)
+- [x] Full system integration tests (all modules together)
+  - Standalone: `tests/test_integration.cpp` (linked via `standalone/tests`)
+  - Cross-module: `agentzero-integration/tests/test_full_system.cpp` (core+perception+knowledge+planning+learning+communication+memory+tools)
+- [x] Performance benchmarks vs. baseline (< 100 ms routine decisions)
+  - Standalone: `tests/test_benchmarks.cpp`
+  - Cross-module: `agentzero-integration/tests/test_system_benchmarks.cpp`
+- [x] Regression baseline establishment
+  - Standalone: `tests/test_regression.cpp`
+  - Cross-module: `agentzero-integration/tests/test_system_regression.cpp`
+- [x] Python interoperability bridge (`agentzero-python-bridge/`)
+  - C API: `include/cog0/cog0_capi.h` + `src/cog0_capi.cpp` → `libcog0_capi`
+  - ctypes package: `agentzero-python-bridge/cog0/`
+  - Optional Cython: `agentzero-python-bridge/cog0/_cog0.pyx`
+- [x] Documentation pass: API reference (`docs/API_REFERENCE.md`), deployment guide (`docs/DEPLOYMENT_GUIDE.md` + `docs/DEPLOYMENT.md`)
 - [x] Bug fix: `CognitiveLoop::start()` now safely joins any previous thread, enabling clean agent restart
 
 ---

@@ -23,9 +23,12 @@ Welcome to the comprehensive documentation for Agent-Zero's C++ implementation i
 - [Communication Module](../agentzero-communication/README.md) - Language and dialogue
 - [Memory Module](../agentzero-memory/README.md) - Context and memory
 - [Tools Module](../agentzero-tools/README.md) - External tool integration
+- [Integration Tests (Phase 9)](../agentzero-integration/README.md) - Full-system integration, benchmarks, regression
+- [Python Bridge (Phase 9)](../agentzero-python-bridge/README.md) - ctypes / Cython bindings for cog0
 
 ### Testing & Quality
 - [Testing Guide](TESTING_GUIDE.md) - Unit, integration, and performance testing
+- [Integration Testing](INTEGRATION_TESTING.md) - Cross-component scenarios
 - [Benchmarking Guide](BENCHMARKING_GUIDE.md) - Performance measurement
 - [Code Quality Standards](CODE_STANDARDS.md) - Coding conventions
 

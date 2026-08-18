@@ -292,6 +292,23 @@ if(NOT BUILD_OPENCOG_MODULES)
     add_subdirectory(agentzero-memory)
     message(STATUS "Adding agentzero-tools with AtomSpace shim (OpenCog modules disabled)")
     add_subdirectory(agentzero-tools)
+
+    # Phase 9: full-system integration / benchmarks / regression (all modules)
+    if(NOT TARGET agentzero_system_integration_tests)
+        message(STATUS "Adding agentzero-integration (Phase 9 full-system tests)")
+        add_subdirectory(agentzero-integration)
+    endif()
+endif()
+
+# When OpenCog modules are enabled the Phase 1–8 targets already exist above;
+# still add Phase 9 integration tests that link all modules together.
+if(BUILD_OPENCOG_MODULES AND BUILD_TESTING)
+    if(TARGET agentzero-core AND TARGET agentzero-tools)
+        if(NOT TARGET agentzero_system_integration_tests)
+            message(STATUS "Adding agentzero-integration (Phase 9 full-system tests)")
+            add_subdirectory(agentzero-integration)
+        endif()
+    endif()
 endif()
 
 # Standalone cog0 application (no OpenCog dependencies required)
@@ -303,6 +320,11 @@ if(BUILD_STANDALONE)
         enable_testing()
     endif()
     add_subdirectory(standalone)
+
+    # Phase 9: Python interoperability bridge (C API + ctypes/Cython)
+    # Depends on standalone sources / optional cog0lib target.
+    message(STATUS "Adding agentzero-python-bridge (Phase 9 Python bindings)")
+    add_subdirectory(agentzero-python-bridge)
 else()
     message(STATUS "Skipping standalone cog0 build (BUILD_STANDALONE=OFF)")
 endif()
