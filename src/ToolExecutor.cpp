@@ -79,6 +79,22 @@ ToolExecutor::ToolExecutor(AtomSpacePtr atomspace)
 
 ToolExecutor::~ToolExecutor()
 {
+    // Join any timed-out workers so they cannot outlive this executor.
+    std::vector<std::shared_ptr<std::future<NormalisedResult>>> pending;
+    {
+        std::lock_guard<std::mutex> lock(_pending_mutex);
+        pending.swap(_pending_futures);
+    }
+    for (auto& future : pending) {
+        if (!future) {
+            continue;
+        }
+        try {
+            future->wait();
+        } catch (...) {
+        }
+    }
+
     logger().info() << "[ToolExecutor] Destroyed (total executions: "
                     << _execution_count.load() << ")";
 }
@@ -92,8 +108,13 @@ NormalisedResult ToolExecutor::execute(ToolWrapper& tool,
 {
     logger().info() << "[ToolExecutor] Executing tool: " << tool.getToolName();
 
-    auto fn = [&]() -> NormalisedResult {
-        ToolResult raw = tool.execute(context);
+    // Capture by value so a timed-out worker does not reference caller stack frames.
+    // ToolWrapper is held via shared_ptr alias; callers must keep `tool` alive until
+    // this ToolExecutor is destroyed (destructor joins timed-out workers).
+    auto tool_ptr = std::shared_ptr<ToolWrapper>(&tool, [](ToolWrapper*) {});
+    ToolExecutionContext ctx = context;
+    auto fn = [this, tool_ptr, ctx]() -> NormalisedResult {
+        ToolResult raw = tool_ptr->execute(ctx);
         return normalise(raw);
     };
 
@@ -126,13 +147,16 @@ NormalisedResult ToolExecutor::executeCommand(const std::string& command,
         return r;
     }
 
-    auto fn = [&]() -> NormalisedResult {
+    // Capture command/args/policy by value for safe detached timeout workers.
+    const std::string cmd_name = command;
+    const std::vector<std::string> cmd_args = args;
+    auto fn = [this, cmd_name, cmd_args]() -> NormalisedResult {
         NormalisedResult result;
         auto start = std::chrono::high_resolution_clock::now();
 
         // Build the command string with sanitised arguments
-        std::string cmd = command;
-        for (const auto& arg : args) {
+        std::string cmd = cmd_name;
+        for (const auto& arg : cmd_args) {
             cmd += " " + sanitiseInput(arg);
         }
         // Redirect stderr to stdout so we capture everything
@@ -165,7 +189,7 @@ NormalisedResult ToolExecutor::executeCommand(const std::string& command,
             result.error = "Process exited with code " + std::to_string(exit_code);
         }
         result.metadata["exit_code"] = std::to_string(exit_code);
-        result.metadata["command"]   = command;
+        result.metadata["command"]   = cmd_name;
         return result;
     };
 
@@ -246,8 +270,9 @@ NormalisedResult ToolExecutor::runWithTimeout(std::function<NormalisedResult()> 
 {
     // Hold the future in a shared_ptr so a timed-out worker is not joined via
     // std::future's blocking destructor (which would defeat the timeout).
+    // Timed-out futures are retained on this executor and joined in ~ToolExecutor.
     auto future = std::make_shared<std::future<NormalisedResult>>(
-        std::async(std::launch::async, fn));
+        std::async(std::launch::async, std::move(fn)));
 
     auto status = future->wait_for(
         std::chrono::milliseconds(static_cast<int>(timeout_ms)));
@@ -260,10 +285,10 @@ NormalisedResult ToolExecutor::runWithTimeout(std::function<NormalisedResult()> 
         r.execution_time_ms = timeout_ms;
         r.metadata["timed_out"] = "true";
         logger().warn() << "[ToolExecutor] " << r.error;
-        // Detach: keep the shared future alive until the worker finishes.
-        std::thread([future]() mutable {
-            try { future->wait(); } catch (...) {}
-        }).detach();
+        {
+            std::lock_guard<std::mutex> lock(_pending_mutex);
+            _pending_futures.push_back(future);
+        }
         return r;
     }
 

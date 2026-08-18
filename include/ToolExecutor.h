@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <functional>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -98,14 +99,18 @@ public:
     /**
      * Execute a ToolWrapper in a sandboxed environment
      *
+     * On timeout the worker may continue in the background until this
+     * ToolExecutor is destroyed. Callers must keep `tool` alive at least
+     * until the executor is destroyed when timeouts are possible.
+     *
      * @param tool     Tool to execute (mutated only via its internal stats)
      * @param context  Execution context supplying parameters and input atoms
      * @param policy   Sandbox security / resource policy
      * @return         Normalised result
      */
-    NormalisedResult execute(ToolWrapper& tool,
-                             const ToolExecutionContext& context,
-                             const SandboxPolicy& policy = SandboxPolicy{});
+        NormalisedResult execute(ToolWrapper& tool,
+                            const ToolExecutionContext& context,
+                            const SandboxPolicy& policy = SandboxPolicy{});
 
     /**
      * Execute a shell command in a sandboxed environment
@@ -172,6 +177,10 @@ private:
     std::atomic<int> _success_count{0};
     std::atomic<int> _failure_count{0};
     std::atomic<int> _timeout_count{0};
+
+    // Futures for workers that outlived their timeout; joined in the destructor.
+    mutable std::mutex _pending_mutex;
+    std::vector<std::shared_ptr<std::future<NormalisedResult>>> _pending_futures;
 
     // Internal helpers
     NormalisedResult runWithTimeout(std::function<NormalisedResult()> fn,

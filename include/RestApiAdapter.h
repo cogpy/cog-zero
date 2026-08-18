@@ -13,6 +13,7 @@
 
 #include <map>
 #include <memory>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 
@@ -252,6 +253,14 @@ private:
     int _success_count{0};
     int _failure_count{0};
     double _total_elapsed_ms{0.0};
+
+    // Shared gate so ToolWrapper executors can detect adapter destruction safely.
+    // null ptr under exclusive lock means the adapter is gone.
+    struct LifetimeGate {
+        std::shared_mutex mutex;
+        RestApiAdapter* ptr{nullptr};
+    };
+    std::shared_ptr<LifetimeGate> _lifetime;
 
     // Internal representation of a parsed URL
     struct ParsedUrl {

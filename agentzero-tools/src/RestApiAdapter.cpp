@@ -60,7 +60,10 @@ std::string HttpResponse::toJSON() const
 RestApiAdapter::RestApiAdapter(const std::string& base_url, AtomSpacePtr atomspace)
     : _base_url(base_url)
     , _atomspace(atomspace)
+    , _lifetime(std::make_shared<LifetimeGate>())
 {
+    _lifetime->ptr = this;
+
     // Default headers
     _default_headers["Content-Type"] = "application/json";
     _default_headers["Accept"]       = "application/json";
@@ -71,6 +74,11 @@ RestApiAdapter::RestApiAdapter(const std::string& base_url, AtomSpacePtr atomspa
 
 RestApiAdapter::~RestApiAdapter()
 {
+    if (_lifetime) {
+        std::unique_lock<std::shared_mutex> lock(_lifetime->mutex);
+        _lifetime->ptr = nullptr;
+    }
+
     logger().info() << "[RestApiAdapter] Destroyed (success=" << _success_count
                     << " failure=" << _failure_count << ")";
 }
@@ -186,13 +194,23 @@ std::shared_ptr<ToolWrapper> RestApiAdapter::createToolWrapper(
     auto tool = std::make_shared<ToolWrapper>(tool_name, ToolType::EXTERNAL_REST_API, as);
     tool->setToolEndpoint(_base_url + path);
 
-    // Capture adapter and path for the custom executor
-    auto adapter = std::shared_ptr<RestApiAdapter>(this, [](RestApiAdapter*) {});
+    // Capture the lifetime gate (not a bare this) so destruction is race-safe.
+    auto lifetime = _lifetime;
     std::string api_path = path;
 
-    tool->setCustomExecutor([adapter, api_path](const ToolExecutionContext& ctx) -> ToolResult {
-        ToolResult result = adapter->callTool(api_path, ctx);
-        return result;
+    tool->setCustomExecutor([lifetime, api_path](const ToolExecutionContext& ctx) -> ToolResult {
+        if (!lifetime) {
+            ToolResult failed(ToolStatus::FAILED);
+            failed.setErrorMessage("RestApiAdapter lifetime gate missing");
+            return failed;
+        }
+        std::shared_lock<std::shared_mutex> lock(lifetime->mutex);
+        if (!lifetime->ptr) {
+            ToolResult failed(ToolStatus::FAILED);
+            failed.setErrorMessage("RestApiAdapter destroyed");
+            return failed;
+        }
+        return lifetime->ptr->callTool(api_path, ctx);
     });
 
     logger().info() << "[RestApiAdapter] Created ToolWrapper '" << tool_name

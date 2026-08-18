@@ -59,12 +59,18 @@ RosBehaviorBridge::RosBehaviorBridge(const std::string& node_name,
     : _node_name(node_name)
     , _atomspace(atomspace)
     , _simulation_mode(true)
+    , _lifetime(std::make_shared<LifetimeGate>())
 {
+    _lifetime->ptr = this;
     logger().info() << "[RosBehaviorBridge] Initialised node='" << _node_name << "'";
 }
 
 RosBehaviorBridge::~RosBehaviorBridge()
 {
+    if (_lifetime) {
+        std::unique_lock<std::shared_mutex> lock(_lifetime->mutex);
+        _lifetime->ptr = nullptr;
+    }
     disconnect();
     logger().info() << "[RosBehaviorBridge] Destroyed (node='" << _node_name << "')";
 }
@@ -329,13 +335,25 @@ std::shared_ptr<ToolWrapper> RosBehaviorBridge::createTopicPublisherTool(
     tool->setToolEndpoint(topic);
     tool->setDescription("ROS topic publisher for " + topic);
 
-    // Capture this bridge and the topic/type
-    RosBehaviorBridge* bridge_ptr = this;
+    // Capture the lifetime gate (not a bare this) so destruction is race-safe.
+    auto lifetime = _lifetime;
     std::string cap_topic = topic;
     RosMessageType cap_type = msg_type;
 
-    tool->setCustomExecutor([bridge_ptr, cap_topic, cap_type](
+    tool->setCustomExecutor([lifetime, cap_topic, cap_type](
                                 const ToolExecutionContext& ctx) -> ToolResult {
+        if (!lifetime) {
+            ToolResult failed(ToolStatus::FAILED);
+            failed.setErrorMessage("RosBehaviorBridge lifetime gate missing");
+            return failed;
+        }
+        std::shared_lock<std::shared_mutex> lock(lifetime->mutex);
+        if (!lifetime->ptr) {
+            ToolResult failed(ToolStatus::FAILED);
+            failed.setErrorMessage("RosBehaviorBridge destroyed");
+            return failed;
+        }
+
         // Serialise context parameters as JSON payload
         std::ostringstream payload;
         payload << "{";
@@ -347,7 +365,7 @@ std::shared_ptr<ToolWrapper> RosBehaviorBridge::createTopicPublisherTool(
         }
         payload << "}";
 
-        bool ok = bridge_ptr->publish(cap_topic, cap_type, payload.str());
+        bool ok = lifetime->ptr->publish(cap_topic, cap_type, payload.str());
         ToolResult r(ok ? ToolStatus::COMPLETED : ToolStatus::FAILED);
         r.setOutput(ok ? "Published to " + cap_topic : "Publish failed");
         r.setMetadata("topic", cap_topic);
@@ -369,11 +387,23 @@ std::shared_ptr<ToolWrapper> RosBehaviorBridge::createServiceCallerTool(
     tool->setToolEndpoint(service);
     tool->setDescription("ROS service caller for " + service);
 
-    RosBehaviorBridge* bridge_ptr = this;
+    auto lifetime = _lifetime;
     std::string cap_service = service;
 
-    tool->setCustomExecutor([bridge_ptr, cap_service](
+    tool->setCustomExecutor([lifetime, cap_service](
                                 const ToolExecutionContext& ctx) -> ToolResult {
+        if (!lifetime) {
+            ToolResult failed(ToolStatus::FAILED);
+            failed.setErrorMessage("RosBehaviorBridge lifetime gate missing");
+            return failed;
+        }
+        std::shared_lock<std::shared_mutex> lock(lifetime->mutex);
+        if (!lifetime->ptr) {
+            ToolResult failed(ToolStatus::FAILED);
+            failed.setErrorMessage("RosBehaviorBridge destroyed");
+            return failed;
+        }
+
         std::ostringstream req;
         req << "{";
         bool first = true;
@@ -384,7 +414,7 @@ std::shared_ptr<ToolWrapper> RosBehaviorBridge::createServiceCallerTool(
         }
         req << "}";
 
-        std::string resp = bridge_ptr->callService(cap_service, req.str());
+        std::string resp = lifetime->ptr->callService(cap_service, req.str());
         bool ok = !resp.empty() && resp.find("\"success\":true") != std::string::npos;
 
         ToolResult r(ok ? ToolStatus::COMPLETED : ToolStatus::FAILED);
