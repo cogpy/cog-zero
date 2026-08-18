@@ -188,11 +188,8 @@ if(BUILD_OPENCOG_MODULES)
     endif()
 
     # Phase 7: Memory & Context (depends on core)
-    if(ATTENTION_FOUND)
-        add_subdirectory(agentzero-memory)
-    else()
-        message(STATUS "Skipping agentzero-memory: attention dependency not found")
-    endif()
+    # Optional attention / atomspace-rocks enable HAVE_* flags; in-memory fallbacks always work
+    add_subdirectory(agentzero-memory)
 
     # Phase 8: Tool Integration (depends on core)
     add_subdirectory(agentzero-tools)
@@ -287,6 +284,8 @@ if(NOT BUILD_OPENCOG_MODULES)
     add_subdirectory(agentzero-learning)
     message(STATUS "Adding agentzero-communication with AtomSpace shim (OpenCog modules disabled)")
     add_subdirectory(agentzero-communication)
+    message(STATUS "Adding agentzero-memory with AtomSpace shim (OpenCog modules disabled)")
+    add_subdirectory(agentzero-memory)
 endif()
 
 # Standalone cog0 application (no OpenCog dependencies required)

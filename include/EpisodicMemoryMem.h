@@ -27,7 +27,7 @@
 #include <opencog/atoms/base/Link.h>
 #include <opencog/util/Logger.h>
 
-#include "MemoryTypes.h"
+#include <opencog/agentzero/memory/MemoryTypes.h>
 
 namespace opencog {
 namespace agentzero {
