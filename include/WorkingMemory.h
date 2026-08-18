@@ -57,7 +57,7 @@ struct MemoryItem {
  *
  * Stores recently relevant atoms with importance scores, context tags,
  * temporal decay, and capacity enforcement. Optional attention-bank
- * synchronisation is enabled when HAVE_ATTENTION is defined.
+ * synchronisation is enabled when HAVE_ATTENTION_BANK is defined.
  */
 class WorkingMemory
 {
@@ -120,7 +120,7 @@ public:
     bool validateMemoryConsistency() const;
     std::string getItemInfo(Handle atom) const;
 
-#ifdef HAVE_ATTENTION
+#ifdef HAVE_ATTENTION_BANK
     void synchronizeWithAttentionBank();
     void setAttentionBank(void* attention_bank);
 #else
@@ -130,6 +130,9 @@ public:
 
 private:
     AtomSpacePtr _atomspace;
+#ifdef HAVE_ATTENTION_BANK
+    void* _attention_bank = nullptr;
+#endif
 
     std::deque<std::shared_ptr<MemoryItem>> _memory_buffer;
     std::map<Handle, std::shared_ptr<MemoryItem>> _memory_index;

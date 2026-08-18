@@ -247,7 +247,7 @@ bool LongTermMemory::store(const Handle& handle,
         // Cache attention value for performance
         AttentionValuePtr av = getAttentionValue(handle);
         if (av) {
-            _importance_cache[handle] = av;
+            _importance_cache[handle] = std::static_pointer_cast<void>(av);
         }
 #endif
         
@@ -691,13 +691,13 @@ AttentionValuePtr LongTermMemory::getAttentionValue(const Handle& handle)
     // Check cache first
     auto cache_it = _importance_cache.find(handle);
     if (cache_it != _importance_cache.end()) {
-        return cache_it->second;
+        return std::static_pointer_cast<AttentionValue>(cache_it->second);
     }
 
     // Get from AtomSpace
     AttentionValuePtr av = AttentionValueCast(handle->getValue(AttentionValue::key()));
     if (av) {
-        _importance_cache[handle] = av;
+        _importance_cache[handle] = std::static_pointer_cast<void>(av);
     }
 
     return av;
@@ -816,7 +816,7 @@ void LongTermMemory::consolidationWorker()
             auto deadline = std::chrono::steady_clock::now() + _config.consolidation_interval;
             while (!_shutdown_requested.load() &&
                    std::chrono::steady_clock::now() < deadline) {
-                std::unique_lock<std::mutex> lk(_memory_mutex);
+                std::unique_lock<std::mutex> lk(_cv_mutex);
                 _consolidation_cv.wait_for(lk, std::chrono::seconds(1));
             }
 
@@ -842,7 +842,7 @@ void LongTermMemory::backupWorker()
             auto deadline = std::chrono::steady_clock::now() + _config.backup_interval;
             while (!_shutdown_requested.load() &&
                    std::chrono::steady_clock::now() < deadline) {
-                std::unique_lock<std::mutex> lk(_memory_mutex);
+                std::unique_lock<std::mutex> lk(_cv_mutex);
                 _consolidation_cv.wait_for(lk, std::chrono::seconds(1));
             }
 

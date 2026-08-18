@@ -122,7 +122,14 @@ private:
     std::thread _backup_thread;
     mutable std::mutex _memory_mutex;
     mutable std::mutex _statistics_mutex;
+    mutable std::mutex _cv_mutex;          // dedicated wait mutex for workers
+    mutable std::mutex _persistence_mutex; // serialises optional rocks I/O
     std::condition_variable _consolidation_cv;
+
+#ifdef HAVE_ATTENTION_BANK
+    // Opaque shared storage for attention values (concrete type in .cpp)
+    std::map<Handle, std::shared_ptr<void>> _importance_cache;
+#endif
 
 #ifdef HAVE_ATOMSPACE_ROCKS
     std::unique_ptr<class RocksStorage> _persistent_storage;

@@ -123,13 +123,24 @@ bool WorkingMemory::addItem(Handle atom, double importance, const std::string& c
         return true;
     }
     
-    // Ensure there is room for the new item (evict until size < capacity)
+    // Ensure there is room for the new item (evict until size < capacity).
+    // Operate on already-locked structures — do not call public locking APIs.
     while (_memory_buffer.size() >= _max_capacity) {
-        if (enforceCapacityLimits() == 0) {
-            // Fallback: drop the least important single item
-            auto least = getLeastImportantItems(1);
-            if (least.empty()) break;
-            removeItem(least[0]->atom);
+        if (_importance_index.empty()) {
+            break;
+        }
+        auto imp_it = _importance_index.begin();  // lowest importance
+        auto victim = imp_it->second;
+        if (!victim || !victim->atom) {
+            _importance_index.erase(imp_it);
+            continue;
+        }
+        Handle victim_atom = victim->atom;
+        removeFromIndices(victim);
+        _memory_index.erase(victim_atom);
+        auto buffer_it = std::find(_memory_buffer.begin(), _memory_buffer.end(), victim);
+        if (buffer_it != _memory_buffer.end()) {
+            _memory_buffer.erase(buffer_it);
         }
     }
     
@@ -887,31 +898,34 @@ size_t WorkingMemory::enforceCapacityLimits()
         return 0;
     }
 
-    // Remove enough items to get strictly below capacity (room for a new insert)
+    // Remove enough items to get strictly below capacity (room for a new insert).
+    // Caller must already hold _memory_mutex; mutate structures directly.
     size_t target = (_max_capacity == 0) ? 0 : _max_capacity - 1;
     if (_memory_buffer.size() <= target) {
         return 0;
     }
-    size_t items_to_remove = _memory_buffer.size() - target;
-    std::vector<Handle> to_remove;
-    
-    // Get least important items for removal
-    auto least_important = getLeastImportantItems(items_to_remove);
-    
-    for (const auto& memory_item : least_important) {
-        to_remove.push_back(memory_item->atom);
-    }
-    
+
     size_t removed_count = 0;
-    for (Handle atom : to_remove) {
-        if (removeItem(atom)) {
-            removed_count++;
+    while (_memory_buffer.size() > target && !_importance_index.empty()) {
+        auto imp_it = _importance_index.begin();
+        auto victim = imp_it->second;
+        if (!victim || !victim->atom) {
+            _importance_index.erase(imp_it);
+            continue;
         }
+        Handle victim_atom = victim->atom;
+        removeFromIndices(victim);
+        _memory_index.erase(victim_atom);
+        auto buffer_it = std::find(_memory_buffer.begin(), _memory_buffer.end(), victim);
+        if (buffer_it != _memory_buffer.end()) {
+            _memory_buffer.erase(buffer_it);
+        }
+        ++removed_count;
     }
-    
-    logger().debug() << "[WorkingMemory] Enforced capacity limits: removed " 
+
+    logger().debug() << "[WorkingMemory] Enforced capacity limits: removed "
                     << removed_count << " items";
-    
+
     return removed_count;
 }
 
