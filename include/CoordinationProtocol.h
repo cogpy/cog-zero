@@ -51,15 +51,17 @@ struct ProtocolPeer {
     int         missed_heartbeats;
 
     ProtocolPeer()
-        : port(0), state(PeerState::ACTIVE), missed_heartbeats(0),
-          last_seen(std::chrono::system_clock::now()) {}
+        : port(0), state(PeerState::ACTIVE),
+          last_seen(std::chrono::system_clock::now()),
+          missed_heartbeats(0) {}
 
     ProtocolPeer(const std::string& id,
                  const std::string& addr,
                  int p)
         : peer_id(id), address(addr), port(p),
-          state(PeerState::ACTIVE), missed_heartbeats(0),
-          last_seen(std::chrono::system_clock::now()) {}
+          state(PeerState::ACTIVE),
+          last_seen(std::chrono::system_clock::now()),
+          missed_heartbeats(0) {}
 };
 
 /**

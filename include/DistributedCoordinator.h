@@ -33,6 +33,9 @@ struct ComputeNode {
     bool is_active;
     int capacity;
     int current_load;
+
+    ComputeNode()
+        : port(0), is_active(false), capacity(100), current_load(0) {}
     
     ComputeNode(const std::string& node_id, const std::string& host, int p)
         : id(node_id), hostname(host), port(p), 
@@ -48,6 +51,9 @@ struct DistributedTask {
     Handle task_atom;  // AtomSpace representation of the task
     std::string assigned_node;
     bool completed;
+
+    DistributedTask()
+        : task_atom(Handle::UNDEFINED), completed(false) {}
     
     DistributedTask(const std::string& id, const std::string& type, Handle atom)
         : task_id(id), task_type(type), task_atom(atom), 
