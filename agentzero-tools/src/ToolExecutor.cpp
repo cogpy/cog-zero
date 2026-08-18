@@ -12,6 +12,7 @@
 #include <array>
 #include <chrono>
 #include <future>
+#include <thread>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -243,9 +244,12 @@ std::string ToolExecutor::getStatistics() const
 NormalisedResult ToolExecutor::runWithTimeout(std::function<NormalisedResult()> fn,
                                                double timeout_ms)
 {
-    auto future = std::async(std::launch::async, fn);
+    // Hold the future in a shared_ptr so a timed-out worker is not joined via
+    // std::future's blocking destructor (which would defeat the timeout).
+    auto future = std::make_shared<std::future<NormalisedResult>>(
+        std::async(std::launch::async, fn));
 
-    auto status = future.wait_for(
+    auto status = future->wait_for(
         std::chrono::milliseconds(static_cast<int>(timeout_ms)));
 
     if (status == std::future_status::timeout) {
@@ -256,11 +260,15 @@ NormalisedResult ToolExecutor::runWithTimeout(std::function<NormalisedResult()> 
         r.execution_time_ms = timeout_ms;
         r.metadata["timed_out"] = "true";
         logger().warn() << "[ToolExecutor] " << r.error;
+        // Detach: keep the shared future alive until the worker finishes.
+        std::thread([future]() mutable {
+            try { future->wait(); } catch (...) {}
+        }).detach();
         return r;
     }
 
     try {
-        return future.get();
+        return future->get();
     } catch (const std::exception& e) {
         NormalisedResult r;
         r.success = false;

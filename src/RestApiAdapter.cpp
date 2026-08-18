@@ -20,6 +20,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <sys/socket.h>
+#include <fcntl.h>
+#include <sys/select.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -410,15 +412,17 @@ HttpResponse RestApiAdapter::sendRequest(const ParsedUrl& parsed,
         return response;
     }
 
-    // Set send/receive timeout
-    struct timeval tv{};
-    tv.tv_sec  = static_cast<long>(timeout_ms / 1000.0);
-    tv.tv_usec = static_cast<long>(std::fmod(timeout_ms, 1000.0) * 1000.0);
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    // Bound connect + I/O so offline / firewalled endpoints cannot hang tests.
+    double effective_timeout = timeout_ms > 0.0 ? timeout_ms : 1000.0;
+    if (effective_timeout > 10000.0) effective_timeout = 10000.0;
 
-    // Connect
-    if (connect(sockfd, res->ai_addr, res->ai_addrlen) < 0) {
+    int flags = fcntl(sockfd, F_GETFL, 0);
+    if (flags >= 0) {
+        fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+    }
+
+    int cret = connect(sockfd, res->ai_addr, res->ai_addrlen);
+    if (cret < 0 && errno != EINPROGRESS) {
         freeaddrinfo(res);
         close(sockfd);
         response.success = false;
@@ -426,7 +430,44 @@ HttpResponse RestApiAdapter::sendRequest(const ParsedUrl& parsed,
         logger().warn() << "[RestApiAdapter] " << response.error;
         return response;
     }
+    if (cret < 0 && errno == EINPROGRESS) {
+        fd_set wfds;
+        FD_ZERO(&wfds);
+        FD_SET(sockfd, &wfds);
+        struct timeval tv{};
+        tv.tv_sec  = static_cast<long>(effective_timeout / 1000.0);
+        tv.tv_usec = static_cast<long>(std::fmod(effective_timeout, 1000.0) * 1000.0);
+        int sel = select(sockfd + 1, nullptr, &wfds, nullptr, &tv);
+        if (sel <= 0) {
+            freeaddrinfo(res);
+            close(sockfd);
+            response.success = false;
+            response.error   = "connect() timed out";
+            logger().warn() << "[RestApiAdapter] " << response.error;
+            return response;
+        }
+        int so_error = 0;
+        socklen_t len = sizeof(so_error);
+        getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len);
+        if (so_error != 0) {
+            freeaddrinfo(res);
+            close(sockfd);
+            response.success = false;
+            response.error   = "connect() failed: " + std::string(strerror(so_error));
+            logger().warn() << "[RestApiAdapter] " << response.error;
+            return response;
+        }
+    }
     freeaddrinfo(res);
+
+    if (flags >= 0) {
+        fcntl(sockfd, F_SETFL, flags);
+    }
+    struct timeval iotv{};
+    iotv.tv_sec  = static_cast<long>(effective_timeout / 1000.0);
+    iotv.tv_usec = static_cast<long>(std::fmod(effective_timeout, 1000.0) * 1000.0);
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &iotv, sizeof(iotv));
+    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &iotv, sizeof(iotv));
 
     // Send request
     size_t total_sent = 0;

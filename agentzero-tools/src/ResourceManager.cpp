@@ -387,7 +387,7 @@ bool ResourceManager::createResourcePool(ResourceType type,
                                         const std::string& name, 
                                         double capacity)
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     // Check if pool already exists
     if (_named_pools.find(name) != _named_pools.end()) {
@@ -415,7 +415,7 @@ bool ResourceManager::createResourcePool(ResourceType type,
 
 bool ResourceManager::removeResourcePool(const std::string& name)
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     auto it = _named_pools.find(name);
     if (it == _named_pools.end()) {
@@ -446,7 +446,7 @@ bool ResourceManager::removeResourcePool(const std::string& name)
 
 std::shared_ptr<ResourcePool> ResourceManager::getResourcePool(const std::string& name) const
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     auto it = _named_pools.find(name);
     if (it != _named_pools.end()) {
@@ -458,7 +458,7 @@ std::shared_ptr<ResourcePool> ResourceManager::getResourcePool(const std::string
 
 std::vector<std::shared_ptr<ResourcePool>> ResourceManager::getPoolsForType(ResourceType type) const
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     auto it = _resource_pools.find(type);
     if (it != _resource_pools.end()) {
@@ -567,7 +567,7 @@ std::shared_ptr<ResourceAllocation> ResourceManager::allocateResource(const std:
         performAutoCleanup();
     }
     
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     _total_allocations++;
     
@@ -612,7 +612,7 @@ std::shared_ptr<ResourceAllocation> ResourceManager::allocateFromPool(const std:
         performAutoCleanup();
     }
     
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     _total_allocations++;
     
@@ -643,7 +643,7 @@ std::shared_ptr<ResourceAllocation> ResourceManager::allocateFromPool(const std:
 
 bool ResourceManager::deallocateResource(const std::string& allocation_id)
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     // Search through all pools
     for (auto& [type, pools] : _resource_pools) {
@@ -667,7 +667,7 @@ bool ResourceManager::deallocateResource(const std::string& allocation_id)
 
 int ResourceManager::deallocateResourcesForRequester(const std::string& requester_id)
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     int count = 0;
     
@@ -695,7 +695,7 @@ bool ResourceManager::hasAvailableResources(ResourceType type, double amount) co
 
 double ResourceManager::getTotalAvailableCapacity(ResourceType type) const
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     double total = 0.0;
     auto it = _resource_pools.find(type);
@@ -710,7 +710,7 @@ double ResourceManager::getTotalAvailableCapacity(ResourceType type) const
 
 double ResourceManager::getTotalAllocatedCapacity(ResourceType type) const
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     double total = 0.0;
     auto it = _resource_pools.find(type);
@@ -725,7 +725,7 @@ double ResourceManager::getTotalAllocatedCapacity(ResourceType type) const
 
 double ResourceManager::getResourceUsage(ResourceType type) const
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     double total_capacity = 0.0;
     double allocated_capacity = 0.0;
@@ -744,7 +744,7 @@ double ResourceManager::getResourceUsage(ResourceType type) const
 
 void ResourceManager::setOptimizationStrategy(OptimizationStrategy strategy)
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     _optimization_strategy = strategy;
     logger().info("ResourceManager: Set optimization strategy to %s",
                  optimizationStrategyToString(strategy).c_str());
@@ -752,7 +752,7 @@ void ResourceManager::setOptimizationStrategy(OptimizationStrategy strategy)
 
 int ResourceManager::cleanupExpiredAllocations()
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     int total_cleaned = 0;
     
@@ -795,7 +795,7 @@ bool ResourceManager::optimizeResourceAllocation()
 
 void ResourceManager::setAtomSpace(AtomSpacePtr atomspace)
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     _atomspace = atomspace;
     
     if (_atomspace) {
@@ -838,7 +838,7 @@ void ResourceManager::recordDeallocationInAtomSpace(const std::string& allocatio
 
 std::string ResourceManager::getStatistics() const
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     std::ostringstream json;
     json << "{";
@@ -872,7 +872,7 @@ std::string ResourceManager::getStatistics() const
 
 std::string ResourceManager::getResourceTypeStatistics(ResourceType type) const
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     std::ostringstream json;
     json << "{";
@@ -903,7 +903,7 @@ double ResourceManager::getSuccessRate() const
 
 void ResourceManager::resetStatistics()
 {
-    std::lock_guard<std::mutex> lock(_manager_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_manager_mutex);
     
     _total_allocations = 0;
     _total_deallocations = 0;

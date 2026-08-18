@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <array>
+#include <cmath>
 
 // POSIX headers for network/subprocess operations
 #ifdef __unix__
@@ -241,38 +242,44 @@ ToolResult ToolWrapper::execute(const ToolExecutionContext& context)
     ToolResult result;
     
     try {
-        // Execute based on tool type
-        switch (_tool_type) {
-            case ToolType::EXTERNAL_REST_API:
-                result = executeRESTTool(context);
-                break;
-                
-            case ToolType::ROS_BEHAVIOR:
-                result = executeROSBehavior(context);
-                break;
-                
-            case ToolType::PYTHON_SCRIPT:
-                result = executePythonScript(context);
-                break;
-                
-            case ToolType::SHELL_COMMAND:
-                result = executeShellCommand(context);
-                break;
-                
-            case ToolType::ATOMSPACE_QUERY:
-                result = executeAtomSpaceQuery(context);
-                break;
-                
-            case ToolType::CUSTOM:
-                result = executeCustomTool(context);
-                break;
-                
-            default:
-                result = ToolResult(ToolStatus::FAILED);
-                result.setErrorMessage("Unknown tool type");
-                break;
+        // Prefer an explicit custom executor (set by RestApiAdapter / RosBehaviorBridge)
+        // over the built-in type dispatch so adapters fully own their invocation path.
+        if (_custom_executor) {
+            result = executeCustomTool(context);
+        } else {
+            // Execute based on tool type
+            switch (_tool_type) {
+                case ToolType::EXTERNAL_REST_API:
+                    result = executeRESTTool(context);
+                    break;
+
+                case ToolType::ROS_BEHAVIOR:
+                    result = executeROSBehavior(context);
+                    break;
+
+                case ToolType::PYTHON_SCRIPT:
+                    result = executePythonScript(context);
+                    break;
+
+                case ToolType::SHELL_COMMAND:
+                    result = executeShellCommand(context);
+                    break;
+
+                case ToolType::ATOMSPACE_QUERY:
+                    result = executeAtomSpaceQuery(context);
+                    break;
+
+                case ToolType::CUSTOM:
+                    result = executeCustomTool(context);
+                    break;
+
+                default:
+                    result = ToolResult(ToolStatus::FAILED);
+                    result.setErrorMessage("Unknown tool type");
+                    break;
+            }
         }
-        
+
     } catch (const std::exception& e) {
         result = ToolResult(ToolStatus::FAILED);
         result.setErrorMessage(std::string("Exception during execution: ") + e.what());
@@ -337,33 +344,32 @@ ToolResult ToolWrapper::executeRESTTool(const ToolExecutionContext& context)
     std::string body = context.hasParameter("body") ? context.getParameter("body") : "";
     
 #ifdef __unix__
-    // Parse endpoint URL: expected format "host:port" or "host" (default port 80)
-    std::string host = _tool_endpoint;
+    // Parse endpoint URL: scheme://host[:port][/path]
+    std::string host;
     int port = 80;
-    
-    size_t colonPos = host.find(':');
-    if (colonPos != std::string::npos) {
-        port = std::stoi(host.substr(colonPos + 1));
-        host = host.substr(0, colonPos);
-    }
-    
-    // Strip protocol prefix if present
-    if (host.find("http://") == 0) {
-        host = host.substr(7);
-    } else if (host.find("https://") == 0) {
-        host = host.substr(8);
-        port = 443;  // Note: HTTPS requires TLS which we don't implement here
-    }
-    
-    // Extract path from host if included
-    size_t slashPos = host.find('/');
-    if (slashPos != std::string::npos) {
-        if (path == "/") {
-            path = host.substr(slashPos);
+    {
+        std::string endpoint = _tool_endpoint;
+        if (endpoint.rfind("https://", 0) == 0) {
+            endpoint = endpoint.substr(8);
+            port = 443;  // Note: HTTPS requires TLS which we don't implement here
+        } else if (endpoint.rfind("http://", 0) == 0) {
+            endpoint = endpoint.substr(7);
+            port = 80;
         }
-        host = host.substr(0, slashPos);
+        size_t slash = endpoint.find('/');
+        std::string hostport = (slash == std::string::npos) ? endpoint : endpoint.substr(0, slash);
+        if (slash != std::string::npos && path == "/") {
+            path = endpoint.substr(slash);
+        }
+        size_t colon = hostport.rfind(':');
+        if (colon != std::string::npos) {
+            host = hostport.substr(0, colon);
+            try { port = std::stoi(hostport.substr(colon + 1)); } catch (...) {}
+        } else {
+            host = hostport;
+        }
     }
-    
+
     // Create socket
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
@@ -375,14 +381,15 @@ ToolResult ToolWrapper::executeRESTTool(const ToolExecutionContext& context)
         result.setMetadata("simulated", "true");
         return result;
     }
-    
-    // Set socket timeout
-    struct timeval tv;
-    tv.tv_sec = static_cast<long>(context.getTimeout() / 1000.0);
-    tv.tv_usec = static_cast<long>(static_cast<int>(context.getTimeout()) % 1000 * 1000);
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    
+
+    // Non-blocking connect with timeout so sandboxed/offline runs cannot hang.
+    double timeout_ms = context.getTimeout() > 0.0 ? context.getTimeout() : 1000.0;
+    if (timeout_ms > 5000.0) timeout_ms = 5000.0;
+    int flags = fcntl(sockfd, F_GETFL, 0);
+    if (flags >= 0) {
+        fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+    }
+
     // Resolve hostname
     struct hostent* server = gethostbyname(host.c_str());
     if (server == nullptr) {
@@ -395,17 +402,17 @@ ToolResult ToolWrapper::executeRESTTool(const ToolExecutionContext& context)
         result.setMetadata("simulated", "true");
         return result;
     }
-    
+
     // Connect to server
     struct sockaddr_in serv_addr;
     memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     memcpy(&serv_addr.sin_addr.s_addr, server->h_addr, static_cast<size_t>(server->h_length));
     serv_addr.sin_port = htons(static_cast<uint16_t>(port));
-    
-    if (connect(sockfd, reinterpret_cast<struct sockaddr*>(&serv_addr), sizeof(serv_addr)) < 0) {
+
+    int cret = connect(sockfd, reinterpret_cast<struct sockaddr*>(&serv_addr), sizeof(serv_addr));
+    if (cret < 0 && errno != EINPROGRESS) {
         close(sockfd);
-        // Connection failed - return simulated response
         logger().debug() << "[ToolWrapper] Connection failed, returning simulated response";
         result.setOutput("HTTP " + method + " " + _tool_endpoint + path + " (simulated - connection failed)");
         result.setMetadata("endpoint", _tool_endpoint);
@@ -413,6 +420,44 @@ ToolResult ToolWrapper::executeRESTTool(const ToolExecutionContext& context)
         result.setMetadata("simulated", "true");
         return result;
     }
+    if (cret < 0 && errno == EINPROGRESS) {
+        fd_set wfds;
+        FD_ZERO(&wfds);
+        FD_SET(sockfd, &wfds);
+        struct timeval tv;
+        tv.tv_sec = static_cast<long>(timeout_ms / 1000.0);
+        tv.tv_usec = static_cast<long>(std::fmod(timeout_ms, 1000.0) * 1000.0);
+        int sel = select(sockfd + 1, nullptr, &wfds, nullptr, &tv);
+        if (sel <= 0) {
+            close(sockfd);
+            result.setStatus(ToolStatus::TIMEOUT);
+            result.setErrorMessage("REST connect timed out");
+            result.setMetadata("endpoint", _tool_endpoint);
+            result.setMetadata("method", method);
+            result.setMetadata("simulated", "true");
+            return result;
+        }
+        int so_error = 0;
+        socklen_t len = sizeof(so_error);
+        getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len);
+        if (so_error != 0) {
+            close(sockfd);
+            result.setOutput("HTTP " + method + " " + _tool_endpoint + path + " (simulated - connection failed)");
+            result.setMetadata("endpoint", _tool_endpoint);
+            result.setMetadata("method", method);
+            result.setMetadata("simulated", "true");
+            return result;
+        }
+    }
+    // Restore blocking mode with I/O timeouts for send/recv.
+    if (flags >= 0) {
+        fcntl(sockfd, F_SETFL, flags);
+    }
+    struct timeval iotv;
+    iotv.tv_sec = static_cast<long>(timeout_ms / 1000.0);
+    iotv.tv_usec = static_cast<long>(std::fmod(timeout_ms, 1000.0) * 1000.0);
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &iotv, sizeof(iotv));
+    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &iotv, sizeof(iotv));
     
     // Build HTTP/1.1 request
     std::ostringstream request;
