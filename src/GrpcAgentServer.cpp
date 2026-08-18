@@ -41,7 +41,7 @@ using SocketIoResult = int;
 #  include <sys/select.h>
 #  include <sys/socket.h>
 #  include <unistd.h>
-#  define CLOSE_SOCKET close
+#  define CLOSE_SOCKET ::close
 #  ifndef INVALID_SOCKET
 #    define INVALID_SOCKET (-1)
 #  endif
@@ -109,15 +109,24 @@ bool GrpcAgentServer::start()
     if (_running.exchange(true))
         return true;
 
-    _serverFd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (_serverFd < 0) {
+#ifdef _WIN32
+    if (!ensureWinsock()) {
+        _running = false;
+        logger().error("GrpcAgentServer: WSAStartup failed");
+        return false;
+    }
+#endif
+
+    _serverFd = static_cast<int>(::socket(AF_INET, SOCK_STREAM, 0));
+    if (_serverFd < 0 || _serverFd == static_cast<int>(INVALID_SOCKET)) {
         _running = false;
         logger().error("GrpcAgentServer: socket() failed");
         return false;
     }
 
     int yes = 1;
-    ::setsockopt(_serverFd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    ::setsockopt(_serverFd, SOL_SOCKET, SO_REUSEADDR,
+                 reinterpret_cast<const char*>(&yes), sizeof(yes));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -126,7 +135,7 @@ bool GrpcAgentServer::start()
 
     if (::bind(_serverFd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         logger().error("GrpcAgentServer: bind() failed on port " + std::to_string(_port));
-        ::close(_serverFd);
+        CLOSE_SOCKET(_serverFd);
         _serverFd = -1;
         _running = false;
         return false;
@@ -142,7 +151,7 @@ bool GrpcAgentServer::start()
 
     if (::listen(_serverFd, 16) < 0) {
         logger().error("GrpcAgentServer: listen() failed");
-        ::close(_serverFd);
+        CLOSE_SOCKET(_serverFd);
         _serverFd = -1;
         _running = false;
         return false;
@@ -161,7 +170,7 @@ void GrpcAgentServer::stop()
 
     if (_serverFd >= 0) {
         ::shutdown(_serverFd, SHUT_RDWR);
-        ::close(_serverFd);
+        CLOSE_SOCKET(_serverFd);
         _serverFd = -1;
     }
     if (_thread.joinable())
@@ -351,11 +360,15 @@ std::string GrpcAgentServer::dispatchJson(const std::string& requestJson)
 bool GrpcAgentServer::_sendFrame(int fd, const std::string& payload)
 {
     uint32_t len = htonl(static_cast<uint32_t>(payload.size()));
-    if (::send(fd, &len, sizeof(len), MSG_NOSIGNAL) != static_cast<ssize_t>(sizeof(len)))
+    if (::send(fd, reinterpret_cast<const char*>(&len),
+               static_cast<int>(sizeof(len)), MSG_NOSIGNAL)
+        != static_cast<SocketIoResult>(sizeof(len)))
         return false;
     size_t sent = 0;
     while (sent < payload.size()) {
-        ssize_t n = ::send(fd, payload.data() + sent, payload.size() - sent, MSG_NOSIGNAL);
+        SocketIoResult n = ::send(fd, payload.data() + sent,
+                                  static_cast<int>(payload.size() - sent),
+                                  MSG_NOSIGNAL);
         if (n <= 0) return false;
         sent += static_cast<size_t>(n);
     }
@@ -367,8 +380,8 @@ bool GrpcAgentServer::_recvFrame(int fd, std::string& out)
     uint32_t len_be = 0;
     size_t got = 0;
     while (got < sizeof(len_be)) {
-        ssize_t n = ::recv(fd, reinterpret_cast<char*>(&len_be) + got,
-                           sizeof(len_be) - got, 0);
+        SocketIoResult n = ::recv(fd, reinterpret_cast<char*>(&len_be) + got,
+                                  static_cast<int>(sizeof(len_be) - got), 0);
         if (n <= 0) return false;
         got += static_cast<size_t>(n);
     }
@@ -379,7 +392,7 @@ bool GrpcAgentServer::_recvFrame(int fd, std::string& out)
     out.assign(len, '\0');
     got = 0;
     while (got < len) {
-        ssize_t n = ::recv(fd, &out[got], len - got, 0);
+        SocketIoResult n = ::recv(fd, &out[got], static_cast<int>(len - got), 0);
         if (n <= 0) return false;
         got += static_cast<size_t>(n);
     }
@@ -400,13 +413,14 @@ void GrpcAgentServer::_listenLoop()
 
         sockaddr_in client{};
         socklen_t clen = sizeof(client);
-        int cfd = ::accept(_serverFd, reinterpret_cast<sockaddr*>(&client), &clen);
+        int cfd = static_cast<int>(
+            ::accept(_serverFd, reinterpret_cast<sockaddr*>(&client), &clen));
         if (cfd < 0) {
             if (!_running.load()) break;
             continue;
         }
         _handleClient(cfd);
-        ::close(cfd);
+        CLOSE_SOCKET(cfd);
     }
 }
 
