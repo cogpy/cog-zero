@@ -1,6 +1,6 @@
 # cog0 Deployment Guide
 
-*cog0 standalone — v0.1.0*
+*cog0 standalone — v0.3.0*
 
 ---
 
@@ -12,6 +12,7 @@
 | CMake | 3.14 | Build system |
 | POSIX threads | — | Available on Linux, macOS, WSL |
 | Ninja *(optional)* | 1.9 | Faster builds |
+| libreadline *(optional)* | — | Tab-completion in the interactive REPL |
 
 > **No OpenCog installation required.**  The standalone build uses only the
 > C++17 standard library and `<thread>`.
@@ -23,8 +24,8 @@
 ### 1. Clone and enter the standalone directory
 
 ```bash
-git clone https://github.com/ReZorg/cog0.git
-cd cog0/standalone
+git clone https://github.com/cogpy/cog-zero.git
+cd cog-zero/standalone
 ```
 
 ### 2. Configure
@@ -42,6 +43,7 @@ Available CMake options:
 |--------|---------|-------------|
 | `CMAKE_BUILD_TYPE` | `Release` | `Release` or `Debug` |
 | `BUILD_TESTING` | `ON` | Build the test suite |
+| `USE_READLINE` | `ON` | Enable GNU readline tab-completion when available |
 
 ### 3. Build
 
@@ -59,8 +61,6 @@ This produces:
 ```bash
 ctest --output-on-failure
 ```
-
-Expected output: **79 tests, 0 failures**.
 
 ### 5. Install (optional)
 
@@ -84,24 +84,33 @@ Installs:
 ```
 
 ```
-cog0 v0.1.0 — Interactive Agent REPL
-Type 'help' for a list of commands.
+cog0 agent 'cog0' ready. Type 'help' for commands.
 
 cog0> help
-  goal <name> [description]   Set a goal
-  task <name> [description]   Schedule a task
-  percept <source> <content>  Inject a percept
-  run [N]                     Run N cognitive cycles (default: 1)
-  status                      Print agent status report
-  atoms                       List all atoms in the store
-  help                        Show this help
-  quit / exit                 Exit
+  goal <name> [description]      Set a new goal
+  goals                          List all goals with priority and status
+  task <name> [description]      Schedule a task
+  percept <text>                 Inject a text percept
+  run [N]                        Run N cognitive cycles (default: 1)
+  infer                          Run one forward-chaining inference pass
+  status                         Print agent status
+  atoms                          List all atoms
+  save <file>                    Save AtomStore snapshot to file
+  load <file>                    Load AtomStore snapshot from file
+  rule <name> if-exists <concept> then-add <concept>
+                                 Add an inference rule
+  help                           Show this help
+  quit / exit                    Exit
 
-cog0> goal explore "Explore the environment"
-cog0> percept sensor obstacle-ahead
+cog0> goal explore Explore the environment
+cog0> percept obstacle-ahead
 cog0> run 3
 cog0> status
 ```
+
+ANSI colour is enabled automatically when stdout is a TTY. Disable it with
+`--no-color`. Tab-completion of command names is available when the binary
+was built with GNU readline (`USE_READLINE=ON` and `libreadline-dev` present).
 
 ### Script execution
 
@@ -111,21 +120,66 @@ cog0> status
 
 `mission.cog0`:
 ```
+# Lines starting with '#' are comments
 goal survive Stay alive
 goal explore Map the area
-percept lidar clear-path
+percept clear-path
 task move-forward Execute locomotion
 run 10
+save mission.snap
 status
+```
+
+### Batch / programmatic mode
+
+Use `--batch` (or `-b`) with `--script` or `--eval` to suppress prompts and
+emit a single JSON status object on stdout — suitable for scripts and CI:
+
+```bash
+./cog0 --batch --script mission.cog0
+./cog0 --batch --name scout --eval "goal patrol; run 5"
+```
+
+Example JSON output:
+
+```json
+{
+  "status": "ok",
+  "agent": "scout",
+  "cycles": 5,
+  "atoms": 12,
+  "tasks_pending": 0,
+  "goals": ["patrol"],
+  "rules": 3
+}
 ```
 
 ### Inline evaluation
 
 ```bash
-./cog0 --eval "goal test Run a quick test; percept src event; run 1; status"
+./cog0 --eval "goal test Run a quick test; percept event; run 1; status"
 ```
 
 Semicolons separate commands within a single `--eval` string.
+
+### Save / load AtomStore snapshots
+
+```bash
+./cog0 --eval "goal g; run 1; save state.snap"
+./cog0 --eval "load state.snap; atoms"
+```
+
+Snapshots are text files (`# cog0-atomstore-snapshot v1`) that preserve nodes,
+links, truth values, and attention values.
+
+### Inference rules
+
+Register a simple existence rule interactively or in a script:
+
+```
+rule derive if-exists Goal:seed then-add DerivedConcept
+infer
+```
 
 ### Demo mode
 

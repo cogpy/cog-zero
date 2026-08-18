@@ -87,7 +87,7 @@ CliArgs parseArgs(int argc, char** argv) {
                 "  -c, --cycles <N>       Run N cognitive cycles then exit\n"
                 "  -n, --name <name>      Set agent name (default: cog0)\n"
                 "  -s, --script <file>    Execute commands from a script file\n"
-                "  -e, --eval <cmd>       Execute a single command and exit\n"
+                "  -e, --eval <cmd>       Execute command(s) and exit ('; separates commands)\n"
                 "  -b, --batch            Emit JSON status after --script/--eval (no prompts)\n"
                 "      --no-color         Disable ANSI colour output\n"
                 "  -h, --help             Show this help\n"
@@ -564,7 +564,24 @@ int main(int argc, char** argv) {
     }
 
     if (!args.eval.empty()) {
-        executeCommand(args.eval, agent, args.batch);
+        // Support semicolon-separated commands: --eval "goal g; run 1; status"
+        std::string eval = args.eval;
+        size_t start = 0;
+        while (start <= eval.size()) {
+            size_t sep = eval.find(';', start);
+            std::string piece = (sep == std::string::npos)
+                ? eval.substr(start)
+                : eval.substr(start, sep - start);
+            // Trim leading/trailing whitespace
+            size_t b = piece.find_first_not_of(" \t\r\n");
+            size_t e = piece.find_last_not_of(" \t\r\n");
+            if (b != std::string::npos) {
+                if (!executeCommand(piece.substr(b, e - b + 1), agent, args.batch))
+                    break;
+            }
+            if (sep == std::string::npos) break;
+            start = sep + 1;
+        }
         if (args.batch) std::cout << batchStatusJson(agent);
         return 0;
     }

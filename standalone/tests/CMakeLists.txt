@@ -19,6 +19,8 @@ add_executable(cog0_tests
     ${COG0_TEST_SRC}/test_cognitive_loop.cpp
     ${COG0_TEST_SRC}/test_agent.cpp
     ${COG0_TEST_SRC}/test_perception.cpp
+    # AtomStore save/load snapshot persistence (CLI save/load commands)
+    ${COG0_TEST_SRC}/test_persistence.cpp
     # Standalone-compatible ActionExecutor / ActionScheduler tests
     # (test_action_executor.cpp and test_action_scheduler.cpp use OpenCog/gtest
     #  and are only built with the full OpenCog tree)
@@ -197,3 +199,18 @@ foreach(_fuzz_src
         )
     endif()
 endforeach()
+
+# -----------------------------------------------------------------------
+# CLI smoke tests — near-term enhancements (--batch, save/load, rule,
+# --no-color, multi-command --eval). Requires the cog0 executable.
+#
+if(TARGET cog0 AND EXISTS "${COG0_TEST_SRC}/cli_smoke.sh")
+    add_test(
+        NAME cog0_cli_smoke
+        COMMAND bash "${COG0_TEST_SRC}/cli_smoke.sh" "$<TARGET_FILE:cog0>"
+    )
+    set_tests_properties(cog0_cli_smoke PROPERTIES
+        LABELS "cli;e2e"
+        TIMEOUT 60
+    )
+endif()
