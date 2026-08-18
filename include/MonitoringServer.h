@@ -135,8 +135,10 @@ public:
 
 private:
     void _listenLoop();
-    void _handleClient(int fd);
-    void _handleClientTls(int fd);
+    /// @return true if fd was retained (e.g. WebSocket); caller must not close.
+    bool _handleClient(int fd);
+    /// @return true if fd was retained (e.g. WebSocket); caller must not close.
+    bool _handleClientTls(int fd);
 
     /// Unified send/recv helpers (plain or TLS depending on session).
     int _ioSend(int fd, TlsSocket* tls, const void* data, size_t len);

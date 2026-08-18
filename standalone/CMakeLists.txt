@@ -104,6 +104,7 @@ foreach(_h
     # Phase 14: gRPC agent interface + TLS
     GrpcAgentServer
     GrpcAgentClient
+    AgentServiceJson
     TlsSocket
 )
     file(CREATE_LINK
@@ -162,7 +163,8 @@ option(USE_TLS "Enable TLS support for MonitoringServer (requires OpenSSL)" ON)
 
 if(USE_TLS)
     find_package(OpenSSL QUIET)
-    if(OpenSSL_FOUND)
+    # FindOpenSSL sets OPENSSL_FOUND; some CMake versions also set OpenSSL_FOUND.
+    if(OPENSSL_FOUND OR OpenSSL_FOUND)
         message(STATUS "  OpenSSL: ${OPENSSL_VERSION} (TLS enabled)")
         target_compile_definitions(cog0lib PUBLIC COG0_HAVE_OPENSSL=1)
         target_link_libraries(cog0lib PUBLIC OpenSSL::SSL OpenSSL::Crypto)

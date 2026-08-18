@@ -82,7 +82,7 @@ public:
     GrpcAgentStatus handleGetStatus() const;
     std::string handleQueryAtoms(const std::string& namePrefix,
                                  const std::string& typeFilter,
-                                 uint32_t limit) const;
+                                 uint32_t limit);
 
     /// Dispatch a JSON request object and return a JSON response object body.
     /// Request shape: {"method":"...","params":{...}}

@@ -13,10 +13,10 @@
 #include "cog0/GrpcAgentServer.h"
 #include "cog0/Logger.h"
 #include "cog0/AtomStore.h"
+#include "cog0/AgentServiceJson.h"
 
 #include <arpa/inet.h>
 #include <cerrno>
-#include <cstdio>
 #include <cstring>
 #include <netinet/in.h>
 #include <sstream>
@@ -26,110 +26,11 @@
 namespace cog0 {
 namespace {
 
-std::string jsonEscape(const std::string& s)
-{
-    std::string out;
-    out.reserve(s.size() + 2);
-    out.push_back('"');
-    for (unsigned char c : s) {
-        switch (c) {
-            case '"':  out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n";  break;
-            case '\r': out += "\\r";  break;
-            case '\t': out += "\\t";  break;
-            default:
-                if (c < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
-                    out += buf;
-                } else {
-                    out.push_back(static_cast<char>(c));
-                }
-        }
-    }
-    out.push_back('"');
-    return out;
-}
-
-// Minimal JSON field extractors (sufficient for our controlled payloads).
-std::string extractStringField(const std::string& json, const std::string& key)
-{
-    const std::string pat = "\"" + key + "\"";
-    auto pos = json.find(pat);
-    if (pos == std::string::npos) return {};
-    pos = json.find(':', pos + pat.size());
-    if (pos == std::string::npos) return {};
-    pos = json.find('"', pos + 1);
-    if (pos == std::string::npos) return {};
-    size_t i = pos + 1;
-    std::string out;
-    while (i < json.size()) {
-        char c = json[i++];
-        if (c == '\\' && i < json.size()) {
-            char n = json[i++];
-            switch (n) {
-                case 'n': out.push_back('\n'); break;
-                case 'r': out.push_back('\r'); break;
-                case 't': out.push_back('\t'); break;
-                case '"': out.push_back('"'); break;
-                case '\\': out.push_back('\\'); break;
-                default: out.push_back(n); break;
-            }
-        } else if (c == '"') {
-            break;
-        } else {
-            out.push_back(c);
-        }
-    }
-    return out;
-}
-
-double extractNumberField(const std::string& json, const std::string& key, double def = 0.0)
-{
-    const std::string pat = "\"" + key + "\"";
-    auto pos = json.find(pat);
-    if (pos == std::string::npos) return def;
-    pos = json.find(':', pos + pat.size());
-    if (pos == std::string::npos) return def;
-    pos = json.find_first_of("-0123456789.", pos + 1);
-    if (pos == std::string::npos) return def;
-    try {
-        size_t end = 0;
-        double v = std::stod(json.substr(pos), &end);
-        return v;
-    } catch (...) {
-        return def;
-    }
-}
-
-uint32_t extractUintField(const std::string& json, const std::string& key, uint32_t def = 0)
-{
-    double v = extractNumberField(json, key, static_cast<double>(def));
-    if (v < 0) return def;
-    return static_cast<uint32_t>(v);
-}
-
-std::string extractObjectField(const std::string& json, const std::string& key)
-{
-    const std::string pat = "\"" + key + "\"";
-    auto pos = json.find(pat);
-    if (pos == std::string::npos) return "{}";
-    pos = json.find('{', pos + pat.size());
-    if (pos == std::string::npos) return "{}";
-    int depth = 0;
-    size_t i = pos;
-    for (; i < json.size(); ++i) {
-        if (json[i] == '{') ++depth;
-        else if (json[i] == '}') {
-            --depth;
-            if (depth == 0) {
-                return json.substr(pos, i - pos + 1);
-            }
-        }
-    }
-    return "{}";
-}
+using agent_json::escape;
+using agent_json::extractNumberField;
+using agent_json::extractObjectField;
+using agent_json::extractStringField;
+using agent_json::extractUintField;
 
 std::string okResult(const std::string& resultJson)
 {
@@ -138,7 +39,7 @@ std::string okResult(const std::string& resultJson)
 
 std::string errResult(const std::string& msg)
 {
-    return std::string("{\"ok\":false,\"error\":") + jsonEscape(msg) + "}";
+    return std::string("{\"ok\":false,\"error\":") + escape(msg) + "}";
 }
 
 } // namespace
@@ -250,8 +151,8 @@ std::string GrpcAgentServer::handleSetGoal(const std::string& name,
         return errResult("failed to set goal");
 
     std::ostringstream out;
-    out << "{\"ok\":true,\"goal_id\":" << jsonEscape(name)
-        << ",\"message\":" << jsonEscape("goal set") << "}";
+    out << "{\"ok\":true,\"goal_id\":" << escape(name)
+        << ",\"message\":" << escape("goal set") << "}";
     return okResult(out.str());
 }
 
@@ -268,7 +169,7 @@ std::string GrpcAgentServer::handleInjectPercept(const std::string& source,
     _agent.addPercept(src, content, sal);
 
     std::ostringstream out;
-    out << "{\"ok\":true,\"message\":" << jsonEscape("percept injected") << "}";
+    out << "{\"ok\":true,\"message\":" << escape("percept injected") << "}";
     return okResult(out.str());
 }
 
@@ -307,10 +208,10 @@ GrpcAgentStatus GrpcAgentServer::handleGetStatus() const
 
 std::string GrpcAgentServer::handleQueryAtoms(const std::string& namePrefix,
                                               const std::string& typeFilter,
-                                              uint32_t limit) const
+                                              uint32_t limit)
 {
     std::lock_guard<std::mutex> lock(_mutex);
-    auto& store = const_cast<Agent&>(_agent).atomStore();
+    auto& store = _agent.atomStore();
 
     std::vector<Atom::Handle> atoms;
     for (int t = static_cast<int>(AtomType::CONCEPT);
@@ -333,8 +234,8 @@ std::string GrpcAgentServer::handleQueryAtoms(const std::string& namePrefix,
         if (!first) out << ',';
         first = false;
         out << "{"
-            << "\"type\":" << jsonEscape(atomTypeName(a->type())) << ","
-            << "\"name\":" << jsonEscape(a->name()) << ","
+            << "\"type\":" << escape(atomTypeName(a->type())) << ","
+            << "\"name\":" << escape(a->name()) << ","
             << "\"sti\":" << a->sti() << ","
             << "\"lti\":" << a->lti() << ","
             << "\"strength\":" << a->tv().strength << ","
@@ -376,9 +277,9 @@ std::string GrpcAgentServer::dispatchJson(const std::string& requestJson)
             out << "{"
                 << "\"cycle\":" << s.cycle << ","
                 << "\"total\":" << s.total << ","
-                << "\"phase\":" << jsonEscape(s.phase) << ","
+                << "\"phase\":" << escape(s.phase) << ","
                 << "\"done\":" << (s.done ? "true" : "false") << ","
-                << "\"detail\":" << jsonEscape(s.detail)
+                << "\"detail\":" << escape(s.detail)
                 << "}";
         }
         out << "]}";
@@ -388,12 +289,12 @@ std::string GrpcAgentServer::dispatchJson(const std::string& requestJson)
         auto st = handleGetStatus();
         std::ostringstream out;
         out << "{"
-            << "\"name\":" << jsonEscape(st.name) << ","
+            << "\"name\":" << escape(st.name) << ","
             << "\"running\":" << (st.running ? "true" : "false") << ","
             << "\"cycle_count\":" << st.cycleCount << ","
             << "\"atom_count\":" << st.atomCount << ","
             << "\"pending_tasks\":" << st.pendingTasks << ","
-            << "\"report\":" << jsonEscape(st.report)
+            << "\"report\":" << escape(st.report)
             << "}";
         return okResult(out.str());
     }

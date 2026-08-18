@@ -141,11 +141,7 @@ TEST(TLS_Context_LoadSelfSigned)
 TEST(TLS_MonitoringServer_HealthReportsDisabledByDefault)
 {
     auto store = std::make_shared<AtomStore>();
-    MonitoringServer srv(store, nullptr, 0);
-
-    // Bind ephemeral by starting — but port 0 may not work; use high port.
-    // Prefer probing _route via start on a free port chosen by OS if supported.
-    // MonitoringServer currently takes fixed port; pick an unlikely one.
+    // MonitoringServer takes a fixed port; pick an unlikely one.
     MonitoringServer server(store, nullptr, 18765);
     server.start();
     std::this_thread::sleep_for(std::chrono::milliseconds(80));

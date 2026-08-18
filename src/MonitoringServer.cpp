@@ -270,10 +270,16 @@ void MonitoringServer::_listenLoop()
 
         // Handle synchronously (one connection at a time is fine for
         // low-frequency scraping; connections are short-lived)
+        // Caller owns clientFd and always closes it unless a WebSocket
+        // upgrade keeps the connection open (handlers return without
+        // transferring ownership of non-WS sockets).
+        bool keepOpen = false;
         if (_tlsEnabled && _tlsContext.ready()) {
-            _handleClientTls(clientFd);
+            keepOpen = _handleClientTls(clientFd);
         } else {
-            _handleClient(clientFd);
+            keepOpen = _handleClient(clientFd);
+        }
+        if (!keepOpen) {
             CLOSE_SOCKET(clientFd);
         }
     }
@@ -292,12 +298,12 @@ void MonitoringServer::_listenLoop()
 // HTTP handling
 // =========================================================================
 
-void MonitoringServer::_handleClient(int fd)
+bool MonitoringServer::_handleClient(int fd)
 {
     // Read request (simplified: read up to 4KB for headers)
     char buf[4096] = {};
     SocketIoResult bytesRead = ::recv(fd, buf, sizeof(buf) - 1, 0);
-    if (bytesRead <= 0) return;
+    if (bytesRead <= 0) return false;
 
     std::string req(buf, static_cast<size_t>(bytesRead));
     std::string method, path;
@@ -309,28 +315,27 @@ void MonitoringServer::_handleClient(int fd)
     // Check for WebSocket upgrade
     if (_wsEnabled && WebSocketHandler::isUpgradeRequest(req)) {
         _handleWebSocketUpgrade(fd, req, nullptr);
-        return;  // Don't close fd — it's now a WebSocket connection
+        return true;  // Don't close fd — it's now a WebSocket connection
     }
 
     std::string response = _handleRequest(method, path, req, fd);
 
     ::send(fd, response.c_str(), static_cast<int>(response.size()), 0);
+    return false;
 }
 
-void MonitoringServer::_handleClientTls(int fd)
+bool MonitoringServer::_handleClientTls(int fd)
 {
     auto tls = TlsSocket::acceptClient(fd, _tlsContext);
     if (!tls) {
-        CLOSE_SOCKET(fd);
-        return;
+        return false;  // caller closes fd
     }
 
     char buf[4096] = {};
     int bytesRead = tls->recv(buf, sizeof(buf) - 1);
     if (bytesRead <= 0) {
         tls->shutdown();
-        CLOSE_SOCKET(fd);
-        return;
+        return false;
     }
 
     std::string req(buf, static_cast<size_t>(bytesRead));
@@ -346,13 +351,13 @@ void MonitoringServer::_handleClientTls(int fd)
             _wsTlsSessions[fd] = shared;
         }
         _handleWebSocketUpgrade(fd, req, shared.get());
-        return;
+        return true;  // WebSocket owns fd
     }
 
     std::string response = _handleRequest(method, path, req, fd);
     tls->send(response.c_str(), response.size());
     tls->shutdown();
-    CLOSE_SOCKET(fd);
+    return false;  // caller closes fd
 }
 
 std::string MonitoringServer::_handleRequest(const std::string& method,

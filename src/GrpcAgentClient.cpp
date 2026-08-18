@@ -8,9 +8,9 @@
  */
 
 #include "cog0/GrpcAgentClient.h"
+#include "cog0/AgentServiceJson.h"
 
 #include <arpa/inet.h>
-#include <cstdio>
 #include <cstring>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -21,108 +21,11 @@
 namespace cog0 {
 namespace {
 
-std::string jsonEscape(const std::string& s)
-{
-    std::string out;
-    out.reserve(s.size() + 2);
-    out.push_back('"');
-    for (unsigned char c : s) {
-        switch (c) {
-            case '"':  out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n";  break;
-            case '\r': out += "\\r";  break;
-            case '\t': out += "\\t";  break;
-            default:
-                if (c < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
-                    out += buf;
-                } else {
-                    out.push_back(static_cast<char>(c));
-                }
-        }
-    }
-    out.push_back('"');
-    return out;
-}
-
-bool responseOk(const std::string& json)
-{
-    auto pos = json.find("\"ok\"");
-    if (pos == std::string::npos) return false;
-    pos = json.find(':', pos);
-    if (pos == std::string::npos) return false;
-    auto t = json.find("true", pos);
-    auto f = json.find("false", pos);
-    if (t == std::string::npos) return false;
-    if (f != std::string::npos && f < t) return false;
-    return true;
-}
-
-std::string extractStringField(const std::string& json, const std::string& key)
-{
-    const std::string pat = "\"" + key + "\"";
-    auto pos = json.find(pat);
-    if (pos == std::string::npos) return {};
-    pos = json.find(':', pos + pat.size());
-    if (pos == std::string::npos) return {};
-    pos = json.find('"', pos + 1);
-    if (pos == std::string::npos) return {};
-    size_t i = pos + 1;
-    std::string out;
-    while (i < json.size()) {
-        char c = json[i++];
-        if (c == '\\' && i < json.size()) {
-            char n = json[i++];
-            switch (n) {
-                case 'n': out.push_back('\n'); break;
-                case 'r': out.push_back('\r'); break;
-                case 't': out.push_back('\t'); break;
-                case '"': out.push_back('"'); break;
-                case '\\': out.push_back('\\'); break;
-                default: out.push_back(n); break;
-            }
-        } else if (c == '"') {
-            break;
-        } else {
-            out.push_back(c);
-        }
-    }
-    return out;
-}
-
-uint64_t extractUint64Field(const std::string& json, const std::string& key, uint64_t def = 0)
-{
-    const std::string pat = "\"" + key + "\"";
-    auto pos = json.find(pat);
-    if (pos == std::string::npos) return def;
-    pos = json.find(':', pos + pat.size());
-    if (pos == std::string::npos) return def;
-    pos = json.find_first_of("0123456789", pos + 1);
-    if (pos == std::string::npos) return def;
-    try {
-        size_t end = 0;
-        unsigned long long v = std::stoull(json.substr(pos), &end);
-        return static_cast<uint64_t>(v);
-    } catch (...) {
-        return def;
-    }
-}
-
-bool extractBoolField(const std::string& json, const std::string& key, bool def = false)
-{
-    const std::string pat = "\"" + key + "\"";
-    auto pos = json.find(pat);
-    if (pos == std::string::npos) return def;
-    pos = json.find(':', pos + pat.size());
-    if (pos == std::string::npos) return def;
-    auto t = json.find("true", pos);
-    auto f = json.find("false", pos);
-    if (t != std::string::npos && (f == std::string::npos || t < f)) return true;
-    if (f != std::string::npos) return false;
-    return def;
-}
+using agent_json::escape;
+using agent_json::extractBoolField;
+using agent_json::extractStringField;
+using agent_json::extractUint64Field;
+using agent_json::responseOk;
 
 } // namespace
 
@@ -220,7 +123,7 @@ bool GrpcAgentClient::_call(const std::string& method,
     }
 
     std::ostringstream req;
-    req << "{\"method\":" << jsonEscape(method)
+    req << "{\"method\":" << escape(method)
         << ",\"params\":" << paramsJson << "}";
 
     if (!_sendFrame(_fd, req.str())) {
@@ -246,8 +149,8 @@ bool GrpcAgentClient::setGoal(const std::string& name,
                               std::string& outMessage)
 {
     std::ostringstream params;
-    params << "{\"name\":" << jsonEscape(name)
-           << ",\"description\":" << jsonEscape(description)
+    params << "{\"name\":" << escape(name)
+           << ",\"description\":" << escape(description)
            << ",\"priority\":" << priority << "}";
     std::string resp;
     if (!_call("SetGoal", params.str(), resp))
@@ -263,8 +166,8 @@ bool GrpcAgentClient::injectPercept(const std::string& source,
                                     std::string& outMessage)
 {
     std::ostringstream params;
-    params << "{\"source\":" << jsonEscape(source)
-           << ",\"content\":" << jsonEscape(content)
+    params << "{\"source\":" << escape(source)
+           << ",\"content\":" << escape(content)
            << ",\"salience\":" << salience << "}";
     std::string resp;
     if (!_call("InjectPercept", params.str(), resp))
@@ -327,8 +230,8 @@ bool GrpcAgentClient::queryAtoms(const std::string& namePrefix,
                                  std::string& outAtomListJson)
 {
     std::ostringstream params;
-    params << "{\"name_prefix\":" << jsonEscape(namePrefix)
-           << ",\"type\":" << jsonEscape(typeFilter)
+    params << "{\"name_prefix\":" << escape(namePrefix)
+           << ",\"type\":" << escape(typeFilter)
            << ",\"limit\":" << limit << "}";
     std::string resp;
     if (!_call("QueryAtoms", params.str(), resp))
