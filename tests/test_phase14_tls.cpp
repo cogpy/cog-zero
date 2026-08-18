@@ -23,10 +23,6 @@
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
 #  define CLOSE_SOCKET closesocket
-#  ifndef popen
-#    define popen  _popen
-#    define pclose _pclose
-#  endif
 using SocketIoResult = int;
 #else
 #  include <arpa/inet.h>
@@ -34,6 +30,10 @@ using SocketIoResult = int;
 #  include <sys/socket.h>
 #  include <unistd.h>
 #  define CLOSE_SOCKET ::close
+#  ifndef INVALID_SOCKET
+#    define INVALID_SOCKET (-1)
+#  endif
+using SOCKET = int;
 using SocketIoResult = ssize_t;
 #endif
 
@@ -91,33 +91,33 @@ std::string httpGet(const std::string& host, uint16_t port, const std::string& p
     if (!ensureWinsock()) return {};
 #endif
 
-    int fd = static_cast<int>(::socket(AF_INET, SOCK_STREAM, 0));
-    if (fd < 0) return {};
+    SOCKET sock = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET) return {};
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     ::inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
 
-    if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-        CLOSE_SOCKET(fd);
+    if (::connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+        CLOSE_SOCKET(sock);
         return {};
     }
 
     std::string req = "GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n";
-    if (::send(fd, req.c_str(), static_cast<int>(req.size()), 0) < 0) {
-        CLOSE_SOCKET(fd);
+    if (::send(sock, req.c_str(), static_cast<int>(req.size()), 0) < 0) {
+        CLOSE_SOCKET(sock);
         return {};
     }
 
     std::string resp;
     char buf[2048];
     for (;;) {
-        SocketIoResult n = ::recv(fd, buf, sizeof(buf), 0);
+        SocketIoResult n = ::recv(sock, buf, static_cast<int>(sizeof(buf)), 0);
         if (n <= 0) break;
         resp.append(buf, static_cast<size_t>(n));
     }
-    CLOSE_SOCKET(fd);
+    CLOSE_SOCKET(sock);
     return resp;
 }
 
