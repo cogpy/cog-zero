@@ -567,7 +567,7 @@ int main(int argc, char** argv) {
         // Support semicolon-separated commands: --eval "goal g; run 1; status"
         std::string eval = args.eval;
         size_t start = 0;
-        while (start <= eval.size()) {
+        while (start < eval.size()) {
             size_t sep = eval.find(';', start);
             std::string piece = (sep == std::string::npos)
                 ? eval.substr(start)

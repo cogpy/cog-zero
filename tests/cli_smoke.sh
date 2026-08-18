@@ -38,6 +38,12 @@ check() {
     fi
 }
 
+json_field() {
+    # Extract a bare numeric field: json_field rules path.json -> 3
+    local key="$1" file="$2"
+    grep -o "\"${key}\": [0-9]*" "$file" | head -1 | awk '{print $2}'
+}
+
 echo "=== cog0 CLI Smoke Tests ==="
 echo ""
 
@@ -73,12 +79,17 @@ run 1
 EOF
 "$COG0" --batch --script "$WORKDIR/load.cog0" >"$WORKDIR/load.json" 2>/dev/null
 # After load + 1 cycle the store must still hold atoms from the snapshot
-atoms=$(grep -o '"atoms": [0-9]*' "$WORKDIR/load.json" | head -1 | awk '{print $2}')
+atoms=$(json_field atoms "$WORKDIR/load.json")
 check "load_restores_atoms" bash -c "test '${atoms:-0}' -ge 1"
 
 # -----------------------------------------------------------------------
 # 3. rule command + infer (rule fires when condition concept exists)
 # -----------------------------------------------------------------------
+# Baseline rule count (default built-in rules; do not hard-code the number)
+"$COG0" --batch --eval "goal seed Seed knowledge" >"$WORKDIR/baseline.json" 2>/dev/null
+baseline_rules=$(json_field rules "$WORKDIR/baseline.json")
+baseline_rules=${baseline_rules:-0}
+
 cat >"$WORKDIR/rule.cog0" <<'EOF'
 goal seed Seed knowledge
 run 1
@@ -87,7 +98,10 @@ infer
 atoms
 EOF
 "$COG0" --batch --script "$WORKDIR/rule.cog0" >"$WORKDIR/rule.json" 2>/dev/null
-check "rule_registered" grep -q '"rules": 4' "$WORKDIR/rule.json"
+after_rules=$(json_field rules "$WORKDIR/rule.json")
+after_rules=${after_rules:-0}
+expected_rules=$((baseline_rules + 1))
+check "rule_registered" bash -c "test '$after_rules' -eq '$expected_rules'"
 
 # Non-batch: assert the rule fired and DerivedConcept was added
 "$COG0" --no-color --script "$WORKDIR/rule.cog0" >"$WORKDIR/rule_out.txt" 2>/dev/null
