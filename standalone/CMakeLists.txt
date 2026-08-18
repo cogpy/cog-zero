@@ -157,6 +157,11 @@ target_include_directories(cog0lib
 
 target_link_libraries(cog0lib PUBLIC Threads::Threads)
 
+# Winsock for MonitoringServer / GrpcAgent* on Windows
+if(WIN32)
+    target_link_libraries(cog0lib PUBLIC ws2_32)
+endif()
+
 # -----------------------------------------------------------------------
 # Optional OpenSSL for MonitoringServer TLS (Phase 14 Feature 2.5)
 option(USE_TLS "Enable TLS support for MonitoringServer (requires OpenSSL)" ON)

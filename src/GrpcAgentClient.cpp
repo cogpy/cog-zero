@@ -10,13 +10,33 @@
 #include "cog0/GrpcAgentClient.h"
 #include "cog0/AgentServiceJson.h"
 
-#include <arpa/inet.h>
 #include <cstring>
-#include <netdb.h>
-#include <netinet/in.h>
 #include <sstream>
-#include <sys/socket.h>
-#include <unistd.h>
+
+// POSIX / Winsock socket headers
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#  define CLOSE_SOCKET closesocket
+#  ifndef MSG_NOSIGNAL
+#    define MSG_NOSIGNAL 0
+#  endif
+#  ifndef SHUT_RDWR
+#    define SHUT_RDWR SD_BOTH
+#  endif
+using SocketIoResult = int;
+#else
+#  include <arpa/inet.h>
+#  include <netdb.h>
+#  include <netinet/in.h>
+#  include <sys/socket.h>
+#  include <unistd.h>
+#  define CLOSE_SOCKET ::close
+using SocketIoResult = ssize_t;
+#endif
 
 namespace cog0 {
 namespace {
@@ -27,10 +47,28 @@ using agent_json::extractStringField;
 using agent_json::extractUint64Field;
 using agent_json::responseOk;
 
+#ifdef _WIN32
+bool ensureWinsock()
+{
+    static const bool ok = []() {
+        WSADATA wsa{};
+        return WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
+    }();
+    return ok;
+}
+#endif
+
 } // namespace
 
 GrpcAgentClient::GrpcAgentClient(const std::string& host, uint16_t port)
 {
+#ifdef _WIN32
+    if (!ensureWinsock()) {
+        _lastError = "WSAStartup failed";
+        return;
+    }
+#endif
+
     addrinfo hints{};
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
@@ -43,16 +81,16 @@ GrpcAgentClient::GrpcAgentClient(const std::string& host, uint16_t port)
         return;
     }
 
-    int fd = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    int fd = static_cast<int>(::socket(res->ai_family, res->ai_socktype, res->ai_protocol));
     if (fd < 0) {
         _lastError = "socket() failed";
         ::freeaddrinfo(res);
         return;
     }
 
-    if (::connect(fd, res->ai_addr, res->ai_addrlen) < 0) {
+    if (::connect(fd, res->ai_addr, static_cast<int>(res->ai_addrlen)) < 0) {
         _lastError = "connect() failed to " + host + ":" + portStr;
-        ::close(fd);
+        CLOSE_SOCKET(fd);
         ::freeaddrinfo(res);
         return;
     }
@@ -70,7 +108,7 @@ void GrpcAgentClient::close()
 {
     if (_fd >= 0) {
         ::shutdown(_fd, SHUT_RDWR);
-        ::close(_fd);
+        CLOSE_SOCKET(_fd);
         _fd = -1;
     }
 }
@@ -78,11 +116,15 @@ void GrpcAgentClient::close()
 bool GrpcAgentClient::_sendFrame(int fd, const std::string& payload)
 {
     uint32_t len = htonl(static_cast<uint32_t>(payload.size()));
-    if (::send(fd, &len, sizeof(len), MSG_NOSIGNAL) != static_cast<ssize_t>(sizeof(len)))
+    if (::send(fd, reinterpret_cast<const char*>(&len),
+               static_cast<int>(sizeof(len)), MSG_NOSIGNAL)
+        != static_cast<SocketIoResult>(sizeof(len)))
         return false;
     size_t sent = 0;
     while (sent < payload.size()) {
-        ssize_t n = ::send(fd, payload.data() + sent, payload.size() - sent, MSG_NOSIGNAL);
+        SocketIoResult n = ::send(fd, payload.data() + sent,
+                                  static_cast<int>(payload.size() - sent),
+                                  MSG_NOSIGNAL);
         if (n <= 0) return false;
         sent += static_cast<size_t>(n);
     }
@@ -94,8 +136,8 @@ bool GrpcAgentClient::_recvFrame(int fd, std::string& out)
     uint32_t len_be = 0;
     size_t got = 0;
     while (got < sizeof(len_be)) {
-        ssize_t n = ::recv(fd, reinterpret_cast<char*>(&len_be) + got,
-                           sizeof(len_be) - got, 0);
+        SocketIoResult n = ::recv(fd, reinterpret_cast<char*>(&len_be) + got,
+                                  static_cast<int>(sizeof(len_be) - got), 0);
         if (n <= 0) return false;
         got += static_cast<size_t>(n);
     }
@@ -106,7 +148,7 @@ bool GrpcAgentClient::_recvFrame(int fd, std::string& out)
     out.assign(len, '\0');
     got = 0;
     while (got < len) {
-        ssize_t n = ::recv(fd, &out[got], len - got, 0);
+        SocketIoResult n = ::recv(fd, &out[got], static_cast<int>(len - got), 0);
         if (n <= 0) return false;
         got += static_cast<size_t>(n);
     }

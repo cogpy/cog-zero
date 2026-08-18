@@ -15,13 +15,34 @@
 #include "cog0/AtomStore.h"
 #include "cog0/AgentServiceJson.h"
 
-#include <arpa/inet.h>
 #include <cerrno>
 #include <cstring>
-#include <netinet/in.h>
 #include <sstream>
-#include <sys/socket.h>
-#include <unistd.h>
+
+// POSIX / Winsock socket headers
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#  define CLOSE_SOCKET closesocket
+#  ifndef MSG_NOSIGNAL
+#    define MSG_NOSIGNAL 0
+#  endif
+#  ifndef SHUT_RDWR
+#    define SHUT_RDWR SD_BOTH
+#  endif
+using SocketIoResult = int;
+#else
+#  include <arpa/inet.h>
+#  include <netinet/in.h>
+#  include <sys/select.h>
+#  include <sys/socket.h>
+#  include <unistd.h>
+#  define CLOSE_SOCKET ::close
+using SocketIoResult = ssize_t;
+#endif
 
 namespace cog0 {
 namespace {
@@ -41,6 +62,18 @@ std::string errResult(const std::string& msg)
 {
     return std::string("{\"ok\":false,\"error\":") + escape(msg) + "}";
 }
+
+#ifdef _WIN32
+// Ensure Winsock is initialized once for this translation unit's socket use.
+bool ensureWinsock()
+{
+    static const bool ok = []() {
+        WSADATA wsa{};
+        return WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
+    }();
+    return ok;
+}
+#endif
 
 } // namespace
 
@@ -72,7 +105,17 @@ bool GrpcAgentServer::start()
     if (_running.exchange(true))
         return true;
 
-    _serverFd = ::socket(AF_INET, SOCK_STREAM, 0);
+#ifdef _WIN32
+    if (!ensureWinsock()) {
+        _running = false;
+        logger().error("GrpcAgentServer: WSAStartup failed");
+        return false;
+    }
+#endif
+
+    // Keep fd as int to match existing API/headers (same pattern as MonitoringServer).
+    // On Windows, INVALID_SOCKET casts to -1 when stored in int.
+    _serverFd = static_cast<int>(::socket(AF_INET, SOCK_STREAM, 0));
     if (_serverFd < 0) {
         _running = false;
         logger().error("GrpcAgentServer: socket() failed");
@@ -80,7 +123,8 @@ bool GrpcAgentServer::start()
     }
 
     int yes = 1;
-    ::setsockopt(_serverFd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    ::setsockopt(_serverFd, SOL_SOCKET, SO_REUSEADDR,
+                 reinterpret_cast<const char*>(&yes), sizeof(yes));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -89,7 +133,7 @@ bool GrpcAgentServer::start()
 
     if (::bind(_serverFd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         logger().error("GrpcAgentServer: bind() failed on port " + std::to_string(_port));
-        ::close(_serverFd);
+        CLOSE_SOCKET(_serverFd);
         _serverFd = -1;
         _running = false;
         return false;
@@ -105,7 +149,7 @@ bool GrpcAgentServer::start()
 
     if (::listen(_serverFd, 16) < 0) {
         logger().error("GrpcAgentServer: listen() failed");
-        ::close(_serverFd);
+        CLOSE_SOCKET(_serverFd);
         _serverFd = -1;
         _running = false;
         return false;
@@ -124,7 +168,7 @@ void GrpcAgentServer::stop()
 
     if (_serverFd >= 0) {
         ::shutdown(_serverFd, SHUT_RDWR);
-        ::close(_serverFd);
+        CLOSE_SOCKET(_serverFd);
         _serverFd = -1;
     }
     if (_thread.joinable())
@@ -314,11 +358,15 @@ std::string GrpcAgentServer::dispatchJson(const std::string& requestJson)
 bool GrpcAgentServer::_sendFrame(int fd, const std::string& payload)
 {
     uint32_t len = htonl(static_cast<uint32_t>(payload.size()));
-    if (::send(fd, &len, sizeof(len), MSG_NOSIGNAL) != static_cast<ssize_t>(sizeof(len)))
+    if (::send(fd, reinterpret_cast<const char*>(&len),
+               static_cast<int>(sizeof(len)), MSG_NOSIGNAL)
+        != static_cast<SocketIoResult>(sizeof(len)))
         return false;
     size_t sent = 0;
     while (sent < payload.size()) {
-        ssize_t n = ::send(fd, payload.data() + sent, payload.size() - sent, MSG_NOSIGNAL);
+        SocketIoResult n = ::send(fd, payload.data() + sent,
+                                  static_cast<int>(payload.size() - sent),
+                                  MSG_NOSIGNAL);
         if (n <= 0) return false;
         sent += static_cast<size_t>(n);
     }
@@ -330,8 +378,8 @@ bool GrpcAgentServer::_recvFrame(int fd, std::string& out)
     uint32_t len_be = 0;
     size_t got = 0;
     while (got < sizeof(len_be)) {
-        ssize_t n = ::recv(fd, reinterpret_cast<char*>(&len_be) + got,
-                           sizeof(len_be) - got, 0);
+        SocketIoResult n = ::recv(fd, reinterpret_cast<char*>(&len_be) + got,
+                                  static_cast<int>(sizeof(len_be) - got), 0);
         if (n <= 0) return false;
         got += static_cast<size_t>(n);
     }
@@ -342,7 +390,7 @@ bool GrpcAgentServer::_recvFrame(int fd, std::string& out)
     out.assign(len, '\0');
     got = 0;
     while (got < len) {
-        ssize_t n = ::recv(fd, &out[got], len - got, 0);
+        SocketIoResult n = ::recv(fd, &out[got], static_cast<int>(len - got), 0);
         if (n <= 0) return false;
         got += static_cast<size_t>(n);
     }
@@ -363,13 +411,14 @@ void GrpcAgentServer::_listenLoop()
 
         sockaddr_in client{};
         socklen_t clen = sizeof(client);
-        int cfd = ::accept(_serverFd, reinterpret_cast<sockaddr*>(&client), &clen);
+        int cfd = static_cast<int>(
+            ::accept(_serverFd, reinterpret_cast<sockaddr*>(&client), &clen));
         if (cfd < 0) {
             if (!_running.load()) break;
             continue;
         }
         _handleClient(cfd);
-        ::close(cfd);
+        CLOSE_SOCKET(cfd);
     }
 }
 
