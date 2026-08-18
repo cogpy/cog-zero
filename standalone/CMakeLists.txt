@@ -101,6 +101,11 @@ foreach(_h
     # Phase 14: WebSocket dashboard
     WebSocketHandler
     DashboardAssets
+    # Phase 14: gRPC agent interface + TLS
+    GrpcAgentServer
+    GrpcAgentClient
+    AgentServiceJson
+    TlsSocket
 )
     file(CREATE_LINK
         "${COG0_ROOT_INCLUDE_DIR}/${_h}.h"
@@ -137,6 +142,10 @@ set(COG0_SOURCES
     # Phase 14: WebSocket monitoring dashboard
     ${COG0_SRC_DIR}/WebSocketHandler.cpp
     ${COG0_SRC_DIR}/DashboardAssets.cpp
+    # Phase 14: gRPC agent interface (JSON fallback) + TLS
+    ${COG0_SRC_DIR}/GrpcAgentServer.cpp
+    ${COG0_SRC_DIR}/GrpcAgentClient.cpp
+    ${COG0_SRC_DIR}/TlsSocket.cpp
 )
 
 add_library(cog0lib STATIC ${COG0_SOURCES})
@@ -147,6 +156,44 @@ target_include_directories(cog0lib
 )
 
 target_link_libraries(cog0lib PUBLIC Threads::Threads)
+
+# -----------------------------------------------------------------------
+# Optional OpenSSL for MonitoringServer TLS (Phase 14 Feature 2.5)
+option(USE_TLS "Enable TLS support for MonitoringServer (requires OpenSSL)" ON)
+
+if(USE_TLS)
+    find_package(OpenSSL QUIET)
+    # FindOpenSSL sets OPENSSL_FOUND; some CMake versions also set OpenSSL_FOUND.
+    if(OPENSSL_FOUND OR OpenSSL_FOUND)
+        message(STATUS "  OpenSSL: ${OPENSSL_VERSION} (TLS enabled)")
+        target_compile_definitions(cog0lib PUBLIC COG0_HAVE_OPENSSL=1)
+        target_link_libraries(cog0lib PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+    else()
+        message(STATUS "  OpenSSL: not found (TLS disabled; install libssl-dev to enable)")
+    endif()
+else()
+    message(STATUS "  OpenSSL/TLS: disabled by USE_TLS=OFF")
+endif()
+
+# -----------------------------------------------------------------------
+# Optional real gRPC (Phase 14 Feature 2.2).  Default is the built-in
+# length-prefixed JSON transport which needs no external deps.
+option(USE_GRPC "Link against real gRPC/protobuf when available" OFF)
+
+if(USE_GRPC)
+    find_package(Protobuf QUIET)
+    find_package(gRPC CONFIG QUIET)
+    if(gRPC_FOUND AND Protobuf_FOUND)
+        message(STATUS "  gRPC: found (real gRPC transport enabled)")
+        target_compile_definitions(cog0lib PUBLIC COG0_HAVE_GRPC=1)
+        # Real gRPC codegen can be wired here when protoc plugins are present.
+        # The JSON fallback remains the default runtime path until then.
+    else()
+        message(STATUS "  gRPC: not found (using JSON AgentService fallback)")
+    endif()
+else()
+    message(STATUS "  gRPC: disabled (JSON AgentService fallback; set -DUSE_GRPC=ON to probe)")
+endif()
 
 # Expose the project version as a preprocessor macro
 target_compile_definitions(cog0lib PUBLIC

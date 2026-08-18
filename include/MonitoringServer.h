@@ -7,13 +7,13 @@
  * Lightweight HTTP/1.1 monitoring server for the standalone cog0 agent.
  *
  * Exposes a small set of JSON endpoints that can feed Prometheus scrapers,
- * dashboards, or simple curl-based health checks.  No external dependencies
- * — the server is built entirely on POSIX sockets (Linux / macOS) and
- * std::thread.
+ * dashboards, or simple curl-based health checks.  Built on POSIX sockets
+ * (Linux / macOS) and std::thread.  Optional OpenSSL TLS when built with
+ * COG0_HAVE_OPENSSL.
  *
  * Endpoints
  * ─────────
- *   GET /health     — {"status":"ok","uptime_s":<n>}
+ *   GET /health     — {"status":"ok","uptime_s":<n>,"tls_enabled":...}
  *   GET /metrics    — JSON object with AtomStore size, cycle count, timing
  *   GET /atoms      — JSON array of all atoms in the AtomStore
  *   GET /attention  — JSON array of (atom, STI, LTI) sorted by STI
@@ -24,6 +24,7 @@
  * ─────
  *   MonitoringServer srv(store, loop, 8080);
  *   srv.enableWebSocket(true);  // enable real-time dashboard
+ *   srv.enableTLS("cert.pem", "key.pem");  // optional TLS
  *   srv.start();          // starts background listener thread
  *   // … agent runs …
  *   srv.stop();           // graceful shutdown
@@ -35,6 +36,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -43,6 +45,7 @@
 
 #include "AtomStore.h"
 #include "CognitiveLoop.h"
+#include "TlsSocket.h"
 
 namespace cog0 {
 
@@ -115,9 +118,31 @@ public:
     /// Set WebSocket broadcast interval in milliseconds (default: 500ms).
     void setWebSocketBroadcastInterval(uint32_t ms) { _wsBroadcastIntervalMs = ms; }
 
+    // ----------------------------------------------------------------
+    // TLS support (Phase 14 Feature 2.5)
+
+    /// Enable TLS using PEM certificate and private key paths.
+    /// Returns false if OpenSSL is unavailable or files cannot be loaded.
+    /// Must be called before start() (or while stopped).
+    bool enableTLS(const std::string& certPath, const std::string& keyPath);
+
+    /// Disable TLS (plain HTTP).
+    void disableTLS();
+
+    [[nodiscard]] bool tlsEnabled() const { return _tlsEnabled; }
+    [[nodiscard]] bool tlsReady() const { return _tlsEnabled && _tlsContext.ready(); }
+    [[nodiscard]] const std::string& tlsLastError() const { return _tlsContext.lastError(); }
+
 private:
     void _listenLoop();
-    void _handleClient(int fd);
+    /// @return true if fd was retained (e.g. WebSocket); caller must not close.
+    bool _handleClient(int fd);
+    /// @return true if fd was retained (e.g. WebSocket); caller must not close.
+    bool _handleClientTls(int fd);
+
+    /// Unified send/recv helpers (plain or TLS depending on session).
+    int _ioSend(int fd, TlsSocket* tls, const void* data, size_t len);
+    int _ioRecv(int fd, TlsSocket* tls, void* data, size_t len);
 
     std::string _handleRequest(const std::string& method,
                                const std::string& path,
@@ -131,8 +156,8 @@ private:
     std::string _routeDashboard() const;
 
     // ---- WebSocket handling ----
-    void _handleWebSocketUpgrade(int fd, const std::string& headers);
-    void _handleWebSocketClient(int fd);
+    void _handleWebSocketUpgrade(int fd, const std::string& headers, TlsSocket* tls = nullptr);
+    void _handleWebSocketClient(int fd, std::shared_ptr<TlsSocket> tls = nullptr);
     void _webSocketBroadcastLoop();
     void _broadcastMetrics();
     void _removeWebSocketClient(int fd);
@@ -165,8 +190,14 @@ private:
     bool                           _wsEnabled = false;
     uint32_t                       _wsBroadcastIntervalMs = 500;
     std::vector<int>               _wsClients;
+    // Optional TLS sessions for WebSocket clients (keyed by fd).
+    std::map<int, std::shared_ptr<TlsSocket>> _wsTlsSessions;
     mutable std::mutex             _wsClientsMutex;
     std::thread                    _wsBroadcastThread;
+
+    // ---- TLS state ----
+    bool                           _tlsEnabled = false;
+    TlsContext                     _tlsContext;
 };
 
 } // namespace cog0

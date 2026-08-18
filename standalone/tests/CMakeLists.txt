@@ -183,6 +183,40 @@ if(EXISTS "${COG0_TEST_SRC}/test_phase14_websocket.cpp")
 endif()
 
 # -----------------------------------------------------------------------
+# Phase 14 Feature 2.2 tests: gRPC Agent Interface (JSON fallback)
+
+if(EXISTS "${COG0_TEST_SRC}/test_phase14_grpc.cpp")
+    add_executable(cog0_phase14_grpc_tests
+        ${COG0_TEST_SRC}/test_main.cpp
+        ${COG0_TEST_SRC}/test_phase14_grpc.cpp
+    )
+    target_link_libraries(cog0_phase14_grpc_tests PRIVATE cog0lib)
+    target_include_directories(cog0_phase14_grpc_tests PRIVATE "${COG0_TEST_SRC}")
+    add_test(NAME cog0_phase14_grpc COMMAND cog0_phase14_grpc_tests)
+    set_tests_properties(cog0_phase14_grpc PROPERTIES
+        LABELS "unit;integration"
+        TIMEOUT 60
+    )
+endif()
+
+# -----------------------------------------------------------------------
+# Phase 14 Feature 2.5 tests: TLS for MonitoringServer
+
+if(EXISTS "${COG0_TEST_SRC}/test_phase14_tls.cpp")
+    add_executable(cog0_phase14_tls_tests
+        ${COG0_TEST_SRC}/test_main.cpp
+        ${COG0_TEST_SRC}/test_phase14_tls.cpp
+    )
+    target_link_libraries(cog0_phase14_tls_tests PRIVATE cog0lib)
+    target_include_directories(cog0_phase14_tls_tests PRIVATE "${COG0_TEST_SRC}")
+    add_test(NAME cog0_phase14_tls COMMAND cog0_phase14_tls_tests)
+    set_tests_properties(cog0_phase14_tls PROPERTIES
+        LABELS "unit;integration"
+        TIMEOUT 60
+    )
+endif()
+
+# -----------------------------------------------------------------------
 # Property-based ("fuzz") tests
 #
 # These files use the TEST() macros from test_runner.h to drive

@@ -62,6 +62,59 @@ MonitoringServer::~MonitoringServer()
 }
 
 // =========================================================================
+// TLS
+// =========================================================================
+
+bool MonitoringServer::enableTLS(const std::string& certPath, const std::string& keyPath)
+{
+    if (_running.load()) {
+        logger().warn("MonitoringServer: enableTLS ignored while running");
+        return false;
+    }
+
+    if (!tlsSupportAvailable()) {
+        logger().warn("MonitoringServer: TLS requested but OpenSSL not available");
+        _tlsEnabled = false;
+        return false;
+    }
+
+    if (!_tlsContext.load(certPath, keyPath)) {
+        logger().error("MonitoringServer: TLS load failed: " + _tlsContext.lastError());
+        _tlsEnabled = false;
+        return false;
+    }
+
+    _tlsEnabled = true;
+    logger().info("MonitoringServer: TLS enabled (cert=" + certPath + ")");
+    return true;
+}
+
+void MonitoringServer::disableTLS()
+{
+    if (_running.load()) {
+        logger().warn("MonitoringServer: disableTLS ignored while running");
+        return;
+    }
+    _tlsEnabled = false;
+}
+
+int MonitoringServer::_ioSend(int fd, TlsSocket* tls, const void* data, size_t len)
+{
+    if (tls) {
+        return tls->send(data, len);
+    }
+    return static_cast<int>(::send(fd, data, static_cast<int>(len), 0));
+}
+
+int MonitoringServer::_ioRecv(int fd, TlsSocket* tls, void* data, size_t len)
+{
+    if (tls) {
+        return tls->recv(data, len);
+    }
+    return static_cast<int>(::recv(fd, data, static_cast<int>(len), 0));
+}
+
+// =========================================================================
 // Lifecycle
 // =========================================================================
 
@@ -72,7 +125,8 @@ void MonitoringServer::start()
     _startTime = std::chrono::steady_clock::now();
     _thread = std::thread([this] { _listenLoop(); });
 
-    logger().info("MonitoringServer started on port " + std::to_string(_port));
+    logger().info("MonitoringServer started on port " + std::to_string(_port) +
+                  (_tlsEnabled ? " (TLS)" : ""));
 }
 
 void MonitoringServer::stop()
@@ -92,6 +146,7 @@ void MonitoringServer::stop()
             CLOSE_SOCKET(fd);
         }
         _wsClients.clear();
+        _wsTlsSessions.clear();
     }
 
     if (_wsBroadcastThread.joinable()) _wsBroadcastThread.join();
@@ -215,8 +270,18 @@ void MonitoringServer::_listenLoop()
 
         // Handle synchronously (one connection at a time is fine for
         // low-frequency scraping; connections are short-lived)
-        _handleClient(clientFd);
-        CLOSE_SOCKET(clientFd);
+        // Caller owns clientFd and always closes it unless a WebSocket
+        // upgrade keeps the connection open (handlers return without
+        // transferring ownership of non-WS sockets).
+        bool keepOpen = false;
+        if (_tlsEnabled && _tlsContext.ready()) {
+            keepOpen = _handleClientTls(clientFd);
+        } else {
+            keepOpen = _handleClient(clientFd);
+        }
+        if (!keepOpen) {
+            CLOSE_SOCKET(clientFd);
+        }
     }
 
     if (_serverFd != INVALID_SOCKET) {
@@ -233,12 +298,12 @@ void MonitoringServer::_listenLoop()
 // HTTP handling
 // =========================================================================
 
-void MonitoringServer::_handleClient(int fd)
+bool MonitoringServer::_handleClient(int fd)
 {
     // Read request (simplified: read up to 4KB for headers)
     char buf[4096] = {};
     SocketIoResult bytesRead = ::recv(fd, buf, sizeof(buf) - 1, 0);
-    if (bytesRead <= 0) return;
+    if (bytesRead <= 0) return false;
 
     std::string req(buf, static_cast<size_t>(bytesRead));
     std::string method, path;
@@ -249,13 +314,50 @@ void MonitoringServer::_handleClient(int fd)
 
     // Check for WebSocket upgrade
     if (_wsEnabled && WebSocketHandler::isUpgradeRequest(req)) {
-        _handleWebSocketUpgrade(fd, req);
-        return;  // Don't close fd — it's now a WebSocket connection
+        _handleWebSocketUpgrade(fd, req, nullptr);
+        return true;  // Don't close fd — it's now a WebSocket connection
     }
 
     std::string response = _handleRequest(method, path, req, fd);
 
     ::send(fd, response.c_str(), static_cast<int>(response.size()), 0);
+    return false;
+}
+
+bool MonitoringServer::_handleClientTls(int fd)
+{
+    auto tls = TlsSocket::acceptClient(fd, _tlsContext);
+    if (!tls) {
+        return false;  // caller closes fd
+    }
+
+    char buf[4096] = {};
+    int bytesRead = tls->recv(buf, sizeof(buf) - 1);
+    if (bytesRead <= 0) {
+        tls->shutdown();
+        return false;
+    }
+
+    std::string req(buf, static_cast<size_t>(bytesRead));
+    std::string method, path;
+    std::istringstream iss(req);
+    iss >> method >> path;
+
+    if (_wsEnabled && WebSocketHandler::isUpgradeRequest(req)) {
+        // Keep tls session alive for the WebSocket client thread.
+        auto shared = std::shared_ptr<TlsSocket>(std::move(tls));
+        {
+            std::lock_guard<std::mutex> lock(_wsClientsMutex);
+            _wsTlsSessions[fd] = shared;
+        }
+        _handleWebSocketUpgrade(fd, req, shared.get());
+        return true;  // WebSocket owns fd
+    }
+
+    std::string response = _handleRequest(method, path, req, fd);
+    tls->send(response.c_str(), response.size());
+    tls->shutdown();
+    return false;  // caller closes fd
 }
 
 std::string MonitoringServer::_handleRequest(const std::string& method,
@@ -290,7 +392,10 @@ std::string MonitoringServer::_routeHealth() const
     std::ostringstream out;
     out << "{"
         << "\"status\":\"ok\","
-        << "\"uptime_s\":" << _jsonDouble(m.uptimeSeconds)
+        << "\"uptime_s\":" << _jsonDouble(m.uptimeSeconds) << ","
+        << "\"tls_enabled\":" << (_tlsEnabled ? "true" : "false") << ","
+        << "\"tls_ready\":" << (tlsReady() ? "true" : "false") << ","
+        << "\"tls_available\":" << (tlsSupportAvailable() ? "true" : "false")
         << "}";
     return out.str();
 }
@@ -384,19 +489,20 @@ std::string MonitoringServer::_routeDashboard() const
 // WebSocket handling
 // =========================================================================
 
-void MonitoringServer::_handleWebSocketUpgrade(int fd, const std::string& headers)
+void MonitoringServer::_handleWebSocketUpgrade(int fd, const std::string& headers,
+                                                 TlsSocket* tls)
 {
     std::string secKey = WebSocketHandler::extractSecKey(headers);
     if (secKey.empty()) {
         // Invalid upgrade request
         std::string response = _httpNotFound();
-        ::send(fd, response.c_str(), static_cast<int>(response.size()), 0);
+        _ioSend(fd, tls, response.c_str(), response.size());
         return;
     }
 
     // Send upgrade response
     std::string response = WebSocketHandler::upgradeResponse(secKey);
-    ::send(fd, response.c_str(), static_cast<int>(response.size()), 0);
+    _ioSend(fd, tls, response.c_str(), response.size());
 
     // Add to WebSocket clients list
     {
@@ -406,15 +512,26 @@ void MonitoringServer::_handleWebSocketUpgrade(int fd, const std::string& header
 
     logger().debug("WebSocket client connected, fd=" + std::to_string(fd));
 
-    // Handle WebSocket client in a separate thread
-    std::thread([this, fd] { _handleWebSocketClient(fd); }).detach();
+    // Capture shared TLS session (if any) for the client thread.
+    std::shared_ptr<TlsSocket> sharedTls;
+    if (tls) {
+        std::lock_guard<std::mutex> lock(_wsClientsMutex);
+        auto it = _wsTlsSessions.find(fd);
+        if (it != _wsTlsSessions.end())
+            sharedTls = it->second;
+    }
+
+    std::thread([this, fd, sharedTls] {
+        _handleWebSocketClient(fd, sharedTls);
+    }).detach();
 }
 
-void MonitoringServer::_handleWebSocketClient(int fd)
+void MonitoringServer::_handleWebSocketClient(int fd, std::shared_ptr<TlsSocket> tls)
 {
     // Set socket to non-blocking for polling
     std::vector<uint8_t> buffer;
     buffer.reserve(1024);
+    TlsSocket* tlsPtr = tls.get();
 
     while (_running.load()) {
         // Read available data
@@ -431,7 +548,7 @@ void MonitoringServer::_handleWebSocketClient(int fd)
         if (ready < 0) break;  // Error
 
         if (ready > 0) {
-            SocketIoResult n = ::recv(fd, buf, sizeof(buf), 0);
+            int n = _ioRecv(fd, tlsPtr, buf, sizeof(buf));
             if (n <= 0) break;  // Connection closed
 
             const auto* bytes = reinterpret_cast<const uint8_t*>(buf);
@@ -453,15 +570,13 @@ void MonitoringServer::_handleWebSocketClient(int fd)
                 if (op == WebSocketHandler::CLOSE) {
                     // Send close frame back
                     auto closeFrame = WebSocketHandler::closeFrame(1000, "");
-                    ::send(fd, reinterpret_cast<const char*>(closeFrame.data()),
-                           static_cast<int>(closeFrame.size()), 0);
+                    _ioSend(fd, tlsPtr, closeFrame.data(), closeFrame.size());
                     _removeWebSocketClient(fd);
                     CLOSE_SOCKET(fd);
                     return;
                 } else if (op == WebSocketHandler::PING) {
                     auto pongFrame = WebSocketHandler::pongFrame(payload);
-                    ::send(fd, reinterpret_cast<const char*>(pongFrame.data()),
-                           static_cast<int>(pongFrame.size()), 0);
+                    _ioSend(fd, tlsPtr, pongFrame.data(), pongFrame.size());
                 }
                 // TEXT frames from client could be commands — ignore for now
             }
@@ -493,8 +608,12 @@ void MonitoringServer::_broadcastMetrics()
     std::vector<int> deadClients;
 
     for (int fd : _wsClients) {
-        SocketIoResult sent = ::send(fd, reinterpret_cast<const char*>(frame.data()),
-                                     static_cast<int>(frame.size()), 0);
+        TlsSocket* tls = nullptr;
+        auto it = _wsTlsSessions.find(fd);
+        if (it != _wsTlsSessions.end())
+            tls = it->second.get();
+
+        int sent = _ioSend(fd, tls, frame.data(), frame.size());
         if (sent <= 0) {
             deadClients.push_back(fd);
         }
@@ -505,6 +624,7 @@ void MonitoringServer::_broadcastMetrics()
         _wsClients.erase(
             std::remove(_wsClients.begin(), _wsClients.end(), fd),
             _wsClients.end());
+        _wsTlsSessions.erase(fd);
         CLOSE_SOCKET(fd);
     }
 }
@@ -515,6 +635,7 @@ void MonitoringServer::_removeWebSocketClient(int fd)
     _wsClients.erase(
         std::remove(_wsClients.begin(), _wsClients.end(), fd),
         _wsClients.end());
+    _wsTlsSessions.erase(fd);
 }
 
 // =========================================================================
