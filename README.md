@@ -58,8 +58,11 @@ cmake --install build --prefix /usr/local
 # Or produce portable archives (TGZ/ZIP; DEB on Linux)
 ./scripts/package.sh
 
-# Packaging smoke test (install tree + find_package consumer + CPack)
+# Packaging smoke (install tree + find_package + CPack TGZ/DEB)
 ./scripts/packaging_smoke.sh
+
+# Python sdist/wheel smoke (RT3 MVP)
+./scripts/python_packaging_smoke.sh
 ```
 
 Containers: `docker build -t cog0 .` → `ghcr.io/cogpy/cog-zero` (see

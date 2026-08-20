@@ -168,9 +168,38 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  python-artifacts:
+    name: Python sdist + wheel (RT3 MVP)
+    needs: validate-version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and smoke-test Python package
+        run: |
+          set -euo pipefail
+          chmod +x scripts/python_packaging_smoke.sh
+          ./scripts/python_packaging_smoke.sh
+          mkdir -p dist-python
+          cp -v build-python-packaging-smoke/dist/cog0-*.whl \
+                build-python-packaging-smoke/dist/cog0-*.tar.gz \
+                dist-python/
+
+      - name: Upload Python artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cog0-${{ needs.validate-version.outputs.version }}-python
+          path: dist-python/*
+          if-no-files-found: error
+
   checksums-and-release:
     name: Checksums & GitHub Release
-    needs: [validate-version, build-artifacts]
+    needs: [validate-version, build-artifacts, python-artifacts]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -186,6 +215,10 @@ jobs:
         working-directory: release-assets
         run: |
           set -euo pipefail
+          ls -la
+          # Flatten one level if download-artifact nested by name
+          find . -mindepth 2 -type f -exec mv -t . {} + 2>/dev/null || true
+          find . -type d -empty -delete 2>/dev/null || true
           ls -la
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
@@ -210,7 +243,7 @@ jobs:
           print(f"## cog0 v{ver}\n")
           print(body)
           print("\n### Artifacts\n")
-          print("See attached archives and `SHA256SUMS`. License: AGPL-3.0.")
+          print("See attached archives, Python sdist/wheel, and `SHA256SUMS`. License: AGPL-3.0.")
           PY
 
       - name: Publish GitHub Release

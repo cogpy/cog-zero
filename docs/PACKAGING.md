@@ -62,12 +62,17 @@ cog0-0.3.0-windows-x86_64.zip
 ```
 
 This configures a Release standalone build, installs into a DESTDIR, runs
-`cog0 --version`, and configures `cmake/tests/find_package_consumer` against the
-install prefix.
+`cog0 --version`, configures `cmake/tests/find_package_consumer` against the
+install prefix, produces a TGZ via CPack, and on Linux also produces DEB
+packages and verifies the runtime `.deb` extracts a working `cog0` binary.
 
 ## Python (MVP)
 
 ```bash
+# Automated smoke (venv + build + install + import)
+./scripts/python_packaging_smoke.sh
+
+# Or manually
 cd agentzero-python-bridge
 python -m pip install build
 python -m build
@@ -78,6 +83,7 @@ python -c "import cog0; print(cog0.__version__)"
 ```
 
 Binary wheels that bundle `libcog0_capi` are a follow-up (cibuildwheel).
+Tag releases attach the pure-Python sdist/wheel to the GitHub Release.
 
 ## Containers
 

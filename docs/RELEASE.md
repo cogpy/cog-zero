@@ -17,6 +17,7 @@ Operator guide for cutting a cog0 / cog-zero release.
 2. **Validate packaging locally**
    ```bash
    ./scripts/packaging_smoke.sh
+   ./scripts/python_packaging_smoke.sh
    ./scripts/package.sh
    ```
 3. **Commit and tag**

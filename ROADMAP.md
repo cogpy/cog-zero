@@ -280,13 +280,55 @@ Complete the remaining Phase 12 deferred items plus new production-readiness wor
 
 ---
 
+## Phase 15 — Packaging & Release Targets ✅ Implemented
 
+### Goals
+Ship installable artifacts for all primary release targets (standalone-first),
+with a single product version, CMake install components, CPack archives,
+container images, Python MVP packaging, and tag-driven GitHub Releases.
+
+### Release targets
+
+| ID | Target | Status |
+|----|--------|--------|
+| RT1 | Standalone runtime (`cog0` binary) | ✅ CPack TGZ/ZIP/DEB, install `Runtime` |
+| RT2 | Standalone SDK (`libcog0.a`, headers, `Cog0` CMake, `cog0.pc`) | ✅ install `Development` + consumer smoke |
+| RT3 | Python `cog0` | ✅ pure-Python sdist/wheel MVP + CI/release smoke |
+| RT4 | OpenCog libraries | ✅ install/export when OpenCog present (source track) |
+| RT5 | Containers | ✅ multi-stage `Dockerfile` + GHCR workflow |
+| RT6 | System packages | ✅ TGZ/ZIP always; DEB (+ RPM when `rpmbuild` present) |
+| RT7 | Metadata | ✅ `VERSION`, `CHANGELOG.md`, `SHA256SUMS` on release |
+
+### Tasks
+- [x] Unified `VERSION` + `cmake/CogZeroVersion.cmake` consumed by root, standalone, Python, CPack, containers
+- [x] Install components: `Runtime`, `Development`, `Python`, `OpenCog`
+- [x] Standalone header install under `include/cog0/`, `Cog0Config.cmake` / pkg-config
+- [x] `cmake/CogZeroCPack.cmake` shared CPack module
+- [x] `scripts/packaging_smoke.sh` — DESTDIR install, `find_package(Cog0)`, TGZ, Linux DEB extract
+- [x] `scripts/python_packaging_smoke.sh` — sdist/wheel build + venv import/version check
+- [x] `scripts/package.sh` — local Release packaging helper
+- [x] `.github/workflows/release.yml` — tag validation, multi-OS artifacts, Python sdist/wheel, SHA256SUMS, GH release
+- [x] `.github/workflows/docker.yml` + `Dockerfile` — GHCR `ghcr.io/cogpy/cog-zero`
+- [x] CI packaging + Python packaging smoke jobs
+- [x] Docs: `docs/PACKAGING.md`, `docs/RELEASE.md`, `docs/VERSIONING.md`
+
+### Follow-ups (not blocking)
+- Binary wheels bundling `libcog0_capi` (cibuildwheel)
+- OpenCog binary packages in CI (needs containerized OpenCog deps)
+- Secondary channels: Homebrew, Snap, Conan/vcpkg, conda-forge, MSI, Helm
+
+### Documentation
+- `docs/PACKAGING.md` — targets, components, local package commands
+- `docs/RELEASE.md` — operator runbook for cutting a release
+- `docs/VERSIONING.md` — semver + SOVERSION policy
+
+---
 
 | Version | Highlights |
 |---------|-----------|
 | **0.5.0** | Phase 14: Agent migration (`serialize`/`deserialize`); WebSocket dashboard (`/dashboard`); pluggable `RaftLogStore`; AgentService gRPC/JSON API; MonitoringServer TLS; `ToolWrapper` REST/Python/Shell; `MessageSerializer` JSON parser; 230+ tests (14 CTest targets) |
 | **0.4.0** | Phase 12: `RaftConsensus` (Raft leader election, pure C++17); `ConflictResolver` (STRICT_PRIORITY / FAIRNESS_WEIGHTED / SLA_PRIORITY); `MonitoringServer` (HTTP /health /metrics /atoms /attention); `Logger` JSON-lines structured logging; 161 tests (7 CTest targets); CTest discoverable from root build dir |
-| **0.3.0** | Phase 13: `cog0` GitHub Copilot agent definition (`.github/agents/cog0.md`); CMake `BUILD_OPENCOG_MODULES` graceful fallback; CTest labels (unit/e2e/integration/benchmark); comprehensive CI pipeline |
+| **0.3.0** | Phase 13 + Phase 15 packaging: `cog0` agent definition; CMake graceful fallback; CTest labels; CI; unified `VERSION`/CPack/install components; release + Docker workflows; Python wheel MVP |
 | **0.2.0** | Phases 4–7 (Planning, Learning, Communication, Memory) marked complete; Phase 11 (Profiling) implemented; `goals` and `infer` REPL commands; Phase 12 roadmap defined; 147 tests |
 | **0.1.3** | Phase 2 Perception: `MultiModalSensor`, `PerceptualProcessor`, `AttentionManager`, `TextualSensor` — 36 new tests (143 total); CI workflow complete |
 | **0.1.2** | ANSI colour output with `--no-color` toggle; readline tab-completion (optional); ROADMAP near-term enhancements complete |
@@ -296,4 +338,4 @@ Complete the remaining Phase 12 deferred items plus new production-readiness wor
 
 ---
 
-*Last updated: 2026-05-28
+*Last updated: 2026-08-20

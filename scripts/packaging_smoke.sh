@@ -82,6 +82,50 @@ fi
 test "${#TGZ[@]}" -ge 1 || { echo "ERROR: no TGZ produced in ${BUILD_DIR}" >&2; ls -la "${BUILD_DIR}" >&2; exit 1; }
 echo "    produced: ${TGZ[*]}"
 
+# Linux DEB smoke: produce packages and verify the runtime .deb installs cleanly
+# in a DESTDIR-style extract (dpkg-deb -x) and that the binary runs.
+if [[ "$(uname -s)" == "Linux" ]]; then
+  echo "==> CPack DEB smoke"
+  (
+    cd "${BUILD_DIR}"
+    cpack --config "${BUILD_DIR}/CPackConfig.cmake" -G DEB
+  )
+  DEBS=( "${BUILD_DIR}"/cog0_*.deb "${BUILD_DIR}"/cog0-*.deb )
+  # Prefer the runtime package (not -dev)
+  RUNTIME_DEB=""
+  for d in "${DEBS[@]}"; do
+    bn="$(basename "${d}")"
+    if [[ "${bn}" == cog0_*_*.deb || "${bn}" == cog0-*.deb ]]; then
+      if [[ "${bn}" != *dev* && "${bn}" != *python* ]]; then
+        RUNTIME_DEB="${d}"
+        break
+      fi
+    fi
+  done
+  if [[ -z "${RUNTIME_DEB}" && ${#DEBS[@]} -ge 1 ]]; then
+    RUNTIME_DEB="${DEBS[0]}"
+  fi
+  test -n "${RUNTIME_DEB}" -a -f "${RUNTIME_DEB}" || {
+    echo "ERROR: no DEB produced in ${BUILD_DIR}" >&2
+    ls -la "${BUILD_DIR}"/*.deb 2>/dev/null || ls -la "${BUILD_DIR}" >&2
+    exit 1
+  }
+  echo "    deb: ${RUNTIME_DEB}"
+  DEB_ROOT="${BUILD_DIR}/deb-extract"
+  rm -rf "${DEB_ROOT}"
+  mkdir -p "${DEB_ROOT}"
+  dpkg-deb -x "${RUNTIME_DEB}" "${DEB_ROOT}"
+  DEB_BIN="$(find "${DEB_ROOT}" -type f -name cog0 | head -n1)"
+  test -n "${DEB_BIN}" || { echo "ERROR: cog0 not found inside DEB" >&2; find "${DEB_ROOT}" >&2; exit 1; }
+  chmod +x "${DEB_BIN}" || true
+  DEB_OUT="$("${DEB_BIN}" --version)"
+  echo "    ${DEB_OUT}"
+  echo "${DEB_OUT}" | grep -q "${VERSION}" || {
+    echo "ERROR: DEB binary version '${DEB_OUT}' does not contain ${VERSION}" >&2
+    exit 1
+  }
+fi
+
 # Clean accidental cwd packages from prior runs
 rm -f "${ROOT}"/cog0-*.tar.gz "${ROOT}"/cog0-*.zip 2>/dev/null || true
 
