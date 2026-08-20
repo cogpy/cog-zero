@@ -179,13 +179,16 @@ jobs:
           VER: ${{ needs.validate-version.outputs.version }}
         run: |
           set -euo pipefail
-          python3 - <<'PY' > release-notes.md
-          import re, pathlib, os
+          python3 <<'PY' > release-notes.md
+          import os
+          import pathlib
+          import re
+
           ver = os.environ["VER"]
           text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
           pat = rf"## \[{re.escape(ver)}\][^\n]*\n(.*?)(?=\n## \[|\Z)"
-          m = re.search(pat, text, flags=re.S)
-          body = m.group(1).strip() if m else f"Release v{ver}"
+          match = re.search(pat, text, flags=re.S)
+          body = match.group(1).strip() if match else f"Release v{ver}"
           print(f"## cog0 v{ver}\n")
           print(body)
           print("\n### Artifacts\n")
