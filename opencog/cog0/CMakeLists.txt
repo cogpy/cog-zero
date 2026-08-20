@@ -58,23 +58,34 @@ TARGET_LINK_LIBRARIES(cog0
     Threads::Threads
 )
 
+IF(NOT DEFINED COGZERO_SOVERSION)
+    SET(COGZERO_SOVERSION 0)
+ENDIF()
+
 SET_TARGET_PROPERTIES(cog0 PROPERTIES
     VERSION   ${PROJECT_VERSION}
-    SOVERSION 0
+    SOVERSION ${COGZERO_SOVERSION}
     OUTPUT_NAME "cog0"
+    EXPORT_NAME cog0
 )
 
 # -----------------------------------------------------------------------
-# Install
+# Install (OpenCog component — libs under lib/opencog per OpenCog convention)
+
+INCLUDE(GNUInstallDirs)
 
 INSTALL(TARGETS cog0
     EXPORT  CogZeroTargets
     LIBRARY DESTINATION lib${LIB_DIR_SUFFIX}/opencog
+            COMPONENT OpenCog
     ARCHIVE DESTINATION lib${LIB_DIR_SUFFIX}/opencog
+            COMPONENT OpenCog
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
 INSTALL(DIRECTORY ${COG0_INC}/
-    DESTINATION include/opencog/cog0
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/opencog/cog0
+    COMPONENT OpenCog
     FILES_MATCHING
         PATTERN "*.h"
         PATTERN "*.hpp"

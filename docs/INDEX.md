@@ -35,6 +35,9 @@ Welcome to the comprehensive documentation for Agent-Zero's C++ implementation i
 ### Operations & Deployment
 - [Deployment Guide](DEPLOYMENT_GUIDE.md) - Production deployment
 - [Production Deployment (Phase 14)](PRODUCTION_DEPLOYMENT.md) - TLS, monitoring, clustering
+- [Packaging](PACKAGING.md) - CPack, install components, containers, Python wheels
+- [Versioning](VERSIONING.md) - Single VERSION source of truth and SOVERSION policy
+- [Release runbook](RELEASE.md) - Tag, GitHub Release, and GHCR checklist
 - [gRPC Agent Interface](GRPC_GUIDE.md) - AgentService API and JSON fallback
 - [Migration Guide](MIGRATION_GUIDE.md) - Live agent state hand-off
 - [Dashboard Guide](DASHBOARD_GUIDE.md) - WebSocket monitoring UI

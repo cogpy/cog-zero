@@ -10,8 +10,11 @@
 cmake_minimum_required(VERSION 3.16)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    get_filename_component(_az_repo_root "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+    list(APPEND CMAKE_MODULE_PATH "${_az_repo_root}/cmake")
+    include(CogZeroVersion)
     project(AgentZeroCommunication
-        VERSION 0.1.0
+        VERSION ${COGZERO_VERSION}
         DESCRIPTION "Agent-Zero Communication & NLP Module"
         LANGUAGES CXX
     )
@@ -106,18 +109,59 @@ else()
     message(STATUS "  LanguageProcessor: basic NLP fallback (lg-atomese not found)")
 endif()
 
+# Ensure version vars exist when built as subdir without parent include
+if(NOT DEFINED COGZERO_VERSION)
+    set(COGZERO_VERSION "${PROJECT_VERSION}")
+endif()
+if(NOT DEFINED COGZERO_SOVERSION)
+    set(COGZERO_SOVERSION 0)
+endif()
+
 set_target_properties(agentzero-communication PROPERTIES
-    VERSION 0.1.0
-    SOVERSION 1
+    VERSION ${COGZERO_VERSION}
+    SOVERSION ${COGZERO_SOVERSION}
     OUTPUT_NAME "agentzero-communication"
     POSITION_INDEPENDENT_CODE ON
 )
 
 include(GNUInstallDirs)
-install(TARGETS agentzero-communication
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+# Shim builds are for tests only — do not install as release artifacts.
+if(NOT AGENTZERO_COMMUNICATION_USE_SHIM)
+    install(TARGETS agentzero-communication
+        EXPORT CogZeroTargets
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                COMPONENT OpenCog
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                COMPONENT OpenCog
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+endif()
+
+if(NOT AGENTZERO_COMMUNICATION_USE_SHIM)
+# Public headers for OpenCog/Development consumers
+set(_agentzero_communication_PUBLIC_HEADERS
+        AgentComms.h
+        CommTypes.h
+        CommunicationTypes.h
+        CommunicationUtils.h
+        ConversationState.h
+        DialogueManager.h
+        HumanInterface.h
+        LanguageProcessor.h
+        MessageHandler.h
+        MessageRouter.h
+        MessageSerializer.h
+        ProtocolManager.h
 )
+foreach(_h ${_agentzero_communication_PUBLIC_HEADERS})
+    if(EXISTS "${COGZERO_ROOT}/include/${_h}")
+        install(FILES "${COGZERO_ROOT}/include/${_h}"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cog0
+            COMPONENT OpenCog
+        )
+    endif()
+endforeach()
+endif()
 
 # ---------------------------------------------------------------------------
 # Tests

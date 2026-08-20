@@ -10,18 +10,26 @@
 cmake_minimum_required(VERSION 3.16)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    get_filename_component(COGZERO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+    list(APPEND CMAKE_MODULE_PATH "${COGZERO_ROOT}/cmake")
+    include(CogZeroVersion)
     project(AgentZeroPythonBridge
-        VERSION 0.1.0
+        VERSION ${COGZERO_VERSION}
         DESCRIPTION "Python Bindings for cog0 / Agent-Zero"
         LANGUAGES CXX
     )
     set(AGENTZERO_PYTHON_BRIDGE_STANDALONE_BUILD TRUE)
     set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
-    get_filename_component(COGZERO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 else()
     set(AGENTZERO_PYTHON_BRIDGE_STANDALONE_BUILD FALSE)
     set(COGZERO_ROOT "${CMAKE_SOURCE_DIR}")
+    if(NOT DEFINED COGZERO_VERSION)
+        set(COGZERO_VERSION "${PROJECT_VERSION}")
+    endif()
+    if(NOT DEFINED COGZERO_SOVERSION)
+        set(COGZERO_SOVERSION 0)
+    endif()
 endif()
 
 option(AGENTZERO_PYTHON_BRIDGE_BUILD_CYTHON "Build Cython extension if Cython is available" ON)
@@ -95,13 +103,18 @@ target_include_directories(cog0_capi PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(cog0_capi PUBLIC Threads::Threads)
-target_compile_definitions(cog0_capi PUBLIC COG0_VERSION="0.3.0")
+target_compile_definitions(cog0_capi PUBLIC COG0_VERSION="${COGZERO_VERSION}")
 
 set_target_properties(cog0_capi PROPERTIES
-    VERSION 0.1.0
-    SOVERSION 1
+    VERSION ${COGZERO_VERSION}
+    SOVERSION ${COGZERO_SOVERSION}
     OUTPUT_NAME "cog0_capi"
     POSITION_INDEPENDENT_CODE ON
+)
+
+# Generate a version module so the pure-Python package stays in sync
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/cog0/_version.py"
+    "# Auto-generated from VERSION — do not edit\n__version__ = \"${COGZERO_VERSION}\"\n"
 )
 
 # Generate a small _libpath helper for ctypes discovery in the build tree
@@ -112,14 +125,22 @@ file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/cog0_libpath.py"
 include(GNUInstallDirs)
 install(TARGETS cog0_capi
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            COMPONENT Python
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            COMPONENT Python
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            COMPONENT Python
 )
 
 set(PYTHON_PKG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cog0")
 install(DIRECTORY ${PYTHON_PKG_DIR}/
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages/cog0
+    COMPONENT Python
     FILES_MATCHING PATTERN "*.py" PATTERN "*.pxd" PATTERN "*.pyx"
+)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cog0/_version.py"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages/cog0
+    COMPONENT Python
 )
 
 # -----------------------------------------------------------------------

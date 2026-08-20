@@ -1,9 +1,29 @@
 @PACKAGE_INIT@
+
+# OpenCog-integrated CogZero package.
+# Imported targets are provided by CogZeroTargets.cmake (NAMESPACE CogZero::).
+
 set(COG_ZERO_VERSION "@PROJECT_VERSION@")
+set(COGZERO_VERSION "@PROJECT_VERSION@")
 
-set(COG_ZERO_INCLUDE_DIR "@CMAKE_INSTALL_PREFIX@/include")
-set(COG_ZERO_DATA_DIR    "@DATADIR@")
-set(COG_ZERO_LIBRARY_DIR "@CMAKE_INSTALL_PREFIX@/lib@LIB_DIR_SUFFIX@/opencog")
+set_and_check(COG_ZERO_INCLUDE_DIR "${PACKAGE_PREFIX_DIR}/include")
+if(DEFINED DATADIR AND NOT "@DATADIR@" STREQUAL "")
+    set(COG_ZERO_DATA_DIR "@DATADIR@")
+else()
+    set(COG_ZERO_DATA_DIR "${PACKAGE_PREFIX_DIR}/share/opencog")
+endif()
+set(COG_ZERO_LIBRARY_DIR "${PACKAGE_PREFIX_DIR}/lib@LIB_DIR_SUFFIX@/opencog")
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads REQUIRED)
+
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/CogZeroTargets.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/CogZeroTargets.cmake")
+endif()
+
 set(COG_ZERO_FOUND 1)
+set(CogZero_FOUND TRUE)
 
-MESSAGE(STATUS "cog-zero version ${COG_ZERO_VERSION} found.")
+check_required_components(CogZero)
+
+message(STATUS "cog-zero version ${COG_ZERO_VERSION} found.")

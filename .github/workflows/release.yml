@@ -1,0 +1,265 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to package (must match VERSION / tag without v)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-version:
+    name: Validate version & CHANGELOG
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE_VER="$(tr -d '[:space:]' < VERSION)"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VER="${{ inputs.version }}"
+          else
+            REF="${GITHUB_REF_NAME}"
+            VER="${REF#v}"
+          fi
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${VER} (VERSION file: ${FILE_VER})"
+          if [[ "${VER}" != "${FILE_VER}" ]]; then
+            echo "ERROR: tag/input version '${VER}' != VERSION file '${FILE_VER}'" >&2
+            exit 1
+          fi
+          if ! grep -qE "^## \[${VER}\]" CHANGELOG.md; then
+            echo "ERROR: CHANGELOG.md missing section '## [${VER}]'" >&2
+            exit 1
+          fi
+
+  build-artifacts:
+    name: Build (${{ matrix.os }})
+    needs: validate-version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact_os: linux-ubuntu22.04
+            artifact_arch: x86_64
+            cpack_system: linux
+            generator: Ninja
+          - os: ubuntu-24.04
+            artifact_os: linux-ubuntu24.04
+            artifact_arch: x86_64
+            cpack_system: linux
+            generator: Ninja
+          - os: macos-14
+            artifact_os: macos
+            artifact_arch: arm64
+            cpack_system: macos
+            generator: Ninja
+          - os: windows-latest
+            artifact_os: windows
+            artifact_arch: x86_64
+            cpack_system: windows
+            generator: Ninja
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          if ! command -v ninja >/dev/null 2>&1; then brew install ninja; fi
+
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: choco install ninja -y --no-progress
+
+      - name: Configure & build standalone
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S standalone -B build-rel \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DCOGZERO_ENABLE_CPACK=ON
+          cmake --build build-rel --parallel
+
+      - name: Smoke --version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f build-rel/cog0.exe ]]; then
+            ./build-rel/cog0.exe --version
+          else
+            ./build-rel/cog0 --version
+          fi | tee version-out.txt
+          grep -q "${{ needs.validate-version.outputs.version }}" version-out.txt
+
+      - name: Package (CPack)
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${{ needs.validate-version.outputs.version }}"
+          OS_TAG="${{ matrix.artifact_os }}"
+          ARCH="${{ matrix.artifact_arch }}"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cpack --config build-rel/CPackConfig.cmake -G ZIP
+          else
+            cpack --config build-rel/CPackConfig.cmake -G TGZ
+            cpack --config build-rel/CPackConfig.cmake -G ZIP
+          fi
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            cpack --config build-rel/CPackConfig.cmake -G DEB || true
+          fi
+          mkdir -p dist
+          shopt -s nullglob
+          # Rename archives so multi-distro Linux jobs never collide on upload.
+          for f in build-rel/*.tar.gz; do
+            base="$(basename "$f")"
+            # Replace generic linux/macos/windows token with matrix artifact_os.
+            out="dist/cog0-${VER}-${OS_TAG}-${ARCH}.tar.gz"
+            cp -v "$f" "$out"
+          done
+          for f in build-rel/*.zip; do
+            out="dist/cog0-${VER}-${OS_TAG}-${ARCH}.zip"
+            cp -v "$f" "$out"
+          done
+          for f in build-rel/*.deb; do
+            bn="$(basename "$f" .deb)"
+            cp -v "$f" "dist/${bn}-${OS_TAG}.deb"
+          done
+          ls -la dist/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cog0-${{ needs.validate-version.outputs.version }}-${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  checksums-and-release:
+    name: Checksums & GitHub Release
+    needs: [validate-version, build-artifacts]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: cog0-${{ needs.validate-version.outputs.version }}-*
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        working-directory: release-assets
+        run: |
+          set -euo pipefail
+          ls -la
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Extract CHANGELOG section
+        id: notes
+        shell: bash
+        env:
+          VER: ${{ needs.validate-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY' > release-notes.md
+          import os
+          import pathlib
+          import re
+
+          ver = os.environ["VER"]
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pat = rf"## \[{re.escape(ver)}\][^\n]*\n(.*?)(?=\n## \[|\Z)"
+          match = re.search(pat, text, flags=re.S)
+          body = match.group(1).strip() if match else f"Release v{ver}"
+          print(f"## cog0 v{ver}\n")
+          print(body)
+          print("\n### Artifacts\n")
+          print("See attached archives and `SHA256SUMS`. License: AGPL-3.0.")
+          PY
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.validate-version.outputs.version }}
+          name: cog0 v${{ needs.validate-version.outputs.version }}
+          body_file: release-notes.md
+          draft: false
+          prerelease: ${{ contains(needs.validate-version.outputs.version, '-') }}
+          files: |
+            release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Docker (GHCR)
+    needs: validate-version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.validate-version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.validate-version.outputs.version }}
+            type=raw,value=latest,enable=${{ !contains(needs.validate-version.outputs.version, '-') }}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64

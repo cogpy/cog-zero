@@ -44,7 +44,27 @@ make -j$(nproc)
 
 # Disable ANSI colour (also auto-disabled in --batch / non-TTY)
 ./cog0 --no-color
+
+# Print version
+./cog0 --version
 ```
+
+### Install & package
+
+```bash
+# Install runtime + SDK (headers, libcog0.a, find_package(Cog0))
+cmake --install build --prefix /usr/local
+
+# Or produce portable archives (TGZ/ZIP; DEB on Linux)
+./scripts/package.sh
+
+# Packaging smoke test (install tree + find_package consumer + CPack)
+./scripts/packaging_smoke.sh
+```
+
+Containers: `docker build -t cog0 .` → `ghcr.io/cogpy/cog-zero` (see
+[docs/PACKAGING.md](docs/PACKAGING.md)). Product version lives in
+[`VERSION`](VERSION); release process in [docs/RELEASE.md](docs/RELEASE.md).
 
 ### Interactive Commands
 
