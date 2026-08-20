@@ -49,46 +49,27 @@ make install
 cogserver -c /etc/opencog/cogserver.conf
 ```
 
-### Option 3: Docker Container
+### Option 3: Docker Container (standalone cog0)
 
-Use Docker for containerized deployment.
+Use the repository root multi-stage `Dockerfile` for the standalone runtime
+(no OpenCog required). Images publish to `ghcr.io/cogpy/cog-zero`.
 
-```dockerfile
-# Dockerfile
-FROM ubuntu:20.04
-
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential cmake git \
-    libboost-all-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install OpenCog
-COPY . /opt/opencog
-WORKDIR /opt/opencog/build
-RUN cmake .. && \
-    make cogutil atomspace cogserver && \
-    make install && \
-    ldconfig
-
-# Build Agent-Zero
-WORKDIR /opt/opencog/agents/cpp/build
-RUN cmake -DCMAKE_BUILD_TYPE=Release .. && \
-    make -j$(nproc) && \
-    make install
-
-# Expose ports
-EXPOSE 17001 18001 5000
-
-# Run
-CMD ["agentzero-standalone"]
-```
-
-Build and run:
 ```bash
-docker build -t agentzero:latest .
-docker run -d -p 17001:17001 -p 18001:18001 agentzero:latest
+# Local build
+docker build -t cog0:local .
+docker run --rm cog0:local --version
+docker run --rm cog0:local --demo
+
+# Published image
+docker pull ghcr.io/cogpy/cog-zero:latest
+docker run --rm ghcr.io/cogpy/cog-zero:latest --version
 ```
+
+Default container command is `cog0 --version` (non-interactive). Override the
+command for demos, scripts, or long-running modes. Ports 8080 (monitoring) and
+50051 (AgentService) are exposed but not started by default.
+
+See [PACKAGING.md](PACKAGING.md) for image tags and AGPL notes.
 
 ### Option 4: Kubernetes Deployment
 

@@ -1,0 +1,26 @@
+@PACKAGE_INIT@
+
+# Standalone cog0 CMake package (Runtime + Development components).
+# Imported targets:
+#   Cog0::cog0lib  — static library
+#   Cog0::cog0     — executable (optional; may be absent in SDK-only installs)
+
+set(COG0_VERSION "@COGZERO_VERSION@")
+set(COG0_BUILT_WITH_OPENSSL "@COG0_BUILT_WITH_OPENSSL@")
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads REQUIRED)
+
+# OpenSSL is a public link dependency when the package was built with USE_TLS
+# and OpenSSL was found (headers may reference TLS types via TlsSocket).
+if(COG0_BUILT_WITH_OPENSSL)
+    find_dependency(OpenSSL REQUIRED)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/Cog0Targets.cmake")
+
+set(COG0_INCLUDE_DIR "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@")
+set(COG0_LIBRARY_DIR "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@")
+set(COG0_FOUND TRUE)
+
+check_required_components(Cog0)

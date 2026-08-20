@@ -1,0 +1,11 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: cog0
+Description: Standalone Agent-Zero C++ library (cog0lib)
+Version: @COGZERO_VERSION@
+Requires:
+Libs: -L${libdir} -lcog0
+Cflags: -I${includedir}

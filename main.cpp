@@ -75,6 +75,13 @@ CliArgs parseArgs(int argc, char** argv) {
             a.script = argv[++i];
         } else if ((arg == "--eval" || arg == "-e") && i + 1 < argc) {
             a.eval = argv[++i];
+        } else if (arg == "--version" || arg == "-V") {
+            // COG0_VERSION is injected by CMake from the top-level VERSION file.
+#ifndef COG0_VERSION
+#define COG0_VERSION "0.3.0"
+#endif
+            std::cout << "cog0 " << COG0_VERSION << "\n";
+            std::exit(0);
         } else if (arg == "--help" || arg == "-h") {
             std::cout <<
                 "cog0 — Standalone Agent-Zero C++ application\n"
@@ -90,6 +97,7 @@ CliArgs parseArgs(int argc, char** argv) {
                 "  -e, --eval <cmd>       Execute command(s) and exit ('; separates commands)\n"
                 "  -b, --batch            Emit JSON status after --script/--eval (no prompts)\n"
                 "      --no-color         Disable ANSI colour output\n"
+                "  -V, --version          Print version and exit\n"
                 "  -h, --help             Show this help\n"
                 "\n"
                 "Interactive commands:\n"

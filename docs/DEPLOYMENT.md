@@ -68,10 +68,15 @@ ctest --output-on-failure
 cmake --install . --prefix /usr/local
 ```
 
-Installs:
+Installs (CMake components `Runtime` + `Development`):
 - `<prefix>/bin/cog0`
-- `<prefix>/lib/libcog0.a`
-- `<prefix>/include/cog0/` (all public headers)
+- `<prefix>/lib/libcog0.a` (or `lib64` on some distros)
+- `<prefix>/include/cog0/` (public standalone headers)
+- `<prefix>/lib/cmake/Cog0/` (`find_package(Cog0)`)
+- `<prefix>/lib/pkgconfig/cog0.pc`
+- `<prefix>/share/doc/cog0*/LICENSE`
+
+See [PACKAGING.md](PACKAGING.md) for CPack archives, containers, and release layout.
 
 ---
 
@@ -199,7 +204,7 @@ Add `cog0lib` as a dependency in your `CMakeLists.txt`:
 
 ```cmake
 # Assuming cog0/standalone is added as a subdirectory or installed
-find_package(cog0 REQUIRED)          # if installed
+find_package(Cog0 REQUIRED)          # standalone SDK (Development component)
 # or:
 add_subdirectory(path/to/cog0/standalone)
 

@@ -9,8 +9,11 @@
 cmake_minimum_required(VERSION 3.16)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    get_filename_component(_az_repo_root "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+    list(APPEND CMAKE_MODULE_PATH "${_az_repo_root}/cmake")
+    include(CogZeroVersion)
     project(AgentZeroDistributed
-        VERSION 0.1.0
+        VERSION ${COGZERO_VERSION}
         DESCRIPTION "Agent-Zero Distributed Computing Module"
         LANGUAGES CXX
     )
@@ -87,18 +90,54 @@ endif()
 
 target_link_libraries(agentzero-distributed PUBLIC Threads::Threads)
 
+# Ensure version vars exist when built as subdir without parent include
+if(NOT DEFINED COGZERO_VERSION)
+    set(COGZERO_VERSION "${PROJECT_VERSION}")
+endif()
+if(NOT DEFINED COGZERO_SOVERSION)
+    set(COGZERO_SOVERSION 0)
+endif()
+
 set_target_properties(agentzero-distributed PROPERTIES
-    VERSION 0.1.0
-    SOVERSION 1
+    VERSION ${COGZERO_VERSION}
+    SOVERSION ${COGZERO_SOVERSION}
     OUTPUT_NAME "agentzero-distributed"
     POSITION_INDEPENDENT_CODE ON
 )
 
 include(GNUInstallDirs)
-install(TARGETS agentzero-distributed
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+# Shim builds are for tests only — do not install as release artifacts.
+if(NOT AGENTZERO_DISTRIBUTED_USE_SHIM)
+    install(TARGETS agentzero-distributed
+        EXPORT CogZeroTargets
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                COMPONENT OpenCog
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                COMPONENT OpenCog
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+endif()
+
+if(NOT AGENTZERO_DISTRIBUTED_USE_SHIM)
+# Public headers for OpenCog/Development consumers
+set(_agentzero_distributed_PUBLIC_HEADERS
+        ClusterManager.h
+        CoordinationProtocol.h
+        DistributedCoordinator.h
+        LoadBalancer.h
+        MultiAgentCoordinator.h
+        RaftConsensus.h
+        MonitoringServer.h
 )
+foreach(_h ${_agentzero_distributed_PUBLIC_HEADERS})
+    if(EXISTS "${COGZERO_ROOT}/include/${_h}")
+        install(FILES "${COGZERO_ROOT}/include/${_h}"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cog0
+            COMPONENT OpenCog
+        )
+    endif()
+endforeach()
+endif()
 
 # ---------------------------------------------------------------------------
 # Tests

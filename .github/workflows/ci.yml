@@ -180,3 +180,31 @@ jobs:
           ctest --output-on-failure \
                 --parallel $(nproc) \
                 --label-regex "^(unit|e2e|integration|fuzz|regression)$"
+
+  packaging-smoke:
+    name: Packaging smoke (install + CPack)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++
+
+      - name: Run packaging smoke script
+        run: |
+          chmod +x scripts/packaging_smoke.sh scripts/package.sh
+          ./scripts/packaging_smoke.sh
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cog0-packaging-smoke
+          path: |
+            build-packaging-smoke/*.tar.gz
+            build-packaging-smoke/*.zip
+            build-packaging-smoke/*.deb
+          if-no-files-found: warn
+          retention-days: 7

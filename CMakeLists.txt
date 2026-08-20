@@ -3,15 +3,18 @@
 
 cmake_minimum_required(VERSION 3.16)
 
+# Add the cmake/ directory to CMake's module search path so that the
+# standard OpenCog cmake modules (Summary, AddCxxtest, etc.) are found.
+# VERSION is read before project() so all targets share one product version.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" ${CMAKE_MODULE_PATH})
+include(CogZeroVersion)
+
 project(AgentZeroCpp
-    VERSION 0.1.0
+    VERSION ${COGZERO_VERSION}
     DESCRIPTION "C++ Agent-Zero Implementation Optimized for OpenCog Integration"
     LANGUAGES CXX
 )
-
-# Add the cmake/ directory to CMake's module search path so that the
-# standard OpenCog cmake modules (Summary, AddCxxtest, etc.) are found.
-set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/")
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -21,6 +24,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(BUILD_TESTING "Build tests" ON)
 option(BUILD_EXAMPLES "Build example applications" ON)
 option(BUILD_DOCS "Build documentation" OFF)
+option(COGZERO_ENABLE_CPACK "Enable CPack packaging targets" ON)
 
 # Standalone cog0 application — builds without any OpenCog dependencies.
 # This is the default when no OpenCog packages are available on the system.
@@ -249,9 +253,17 @@ if(BUILD_OPENCOG_MODULES)
         PATH_VARS CMAKE_INSTALL_PREFIX
     )
 
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/CogZeroConfigVersion.cmake"
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+    )
+
     install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/CogZeroConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/CogZeroConfigVersion.cmake"
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CogZero
+        COMPONENT OpenCog
     )
 
     # Export targets for installation
@@ -259,12 +271,17 @@ if(BUILD_OPENCOG_MODULES)
         FILE CogZeroTargets.cmake
         NAMESPACE CogZero::
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CogZero
+        COMPONENT OpenCog
     )
 
     # Install the cmake modules so downstream packages can find them
+    # (exclude packaging templates that are not runtime cmake modules)
     install(DIRECTORY ${CMAKE_SOURCE_DIR}/cmake/
         DESTINATION ${DATADIR}/cmake
+        COMPONENT OpenCog
         FILES_MATCHING PATTERN "*.cmake"
+        PATTERN "Cog0Config.cmake.in" EXCLUDE
+        PATTERN "tests" EXCLUDE
     )
 endif()
 
@@ -331,10 +348,27 @@ else()
     message(STATUS "Skipping standalone cog0 build (BUILD_STANDALONE=OFF)")
 endif()
 
+# -----------------------------------------------------------------------
+# CPack (monorepo entrypoint — standalone-first default profile)
+
+if(COGZERO_ENABLE_CPACK AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(COGZERO_CPACK_PACKAGE_NAME "cog-zero")
+    set(COGZERO_CPACK_SUMMARY "cog-zero — Agent-Zero C++ monorepo packages")
+    set(COGZERO_REPO_ROOT "${CMAKE_SOURCE_DIR}")
+    if(BUILD_OPENCOG_MODULES)
+        set(COGZERO_CPACK_INCLUDE_OPENCOG TRUE)
+    endif()
+    if(BUILD_STANDALONE AND TARGET cog0_capi)
+        set(COGZERO_CPACK_INCLUDE_PYTHON TRUE)
+    endif()
+    include(CogZeroCPack)
+endif()
+
 # Status summary
 message(STATUS "")
 message(STATUS "Agent-Zero C++ Configuration Summary:")
 message(STATUS "  Version: ${PROJECT_VERSION}")
+message(STATUS "  SOVERSION: ${COGZERO_SOVERSION}")
 message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  C++ standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Install prefix: ${CMAKE_INSTALL_PREFIX}")
@@ -343,6 +377,7 @@ message(STATUS "  Build examples: ${BUILD_EXAMPLES}")
 message(STATUS "  Build documentation: ${BUILD_DOCS}")
 message(STATUS "  Build OpenCog modules: ${BUILD_OPENCOG_MODULES}")
 message(STATUS "  Build standalone: ${BUILD_STANDALONE}")
+message(STATUS "  CPack: ${COGZERO_ENABLE_CPACK}")
 message(STATUS "")
 message(STATUS "This is part of the AGENT-ZERO-GENESIS project.")
 message(STATUS "See AGENT-ZERO-GENESIS.md for complete roadmap and development tasks.")

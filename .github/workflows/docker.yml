@@ -1,0 +1,74 @@
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "standalone/**"
+      - "src/**"
+      - "include/**"
+      - "main.cpp"
+      - "VERSION"
+      - "cmake/CogZeroVersion.cmake"
+      - ".github/workflows/docker.yml"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "standalone/**"
+      - "src/**"
+      - "include/**"
+      - "main.cpp"
+      - "VERSION"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build runtime image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build (no push on PR)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: true
+          tags: cog0:ci
+          platforms: linux/amd64
+
+      - name: Smoke run
+        run: |
+          docker run --rm cog0:ci --version
+          docker run --rm cog0:ci --help >/dev/null
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push to GHCR (main)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:edge
+            ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          platforms: linux/amd64
