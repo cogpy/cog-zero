@@ -83,6 +83,8 @@ file(MAKE_DIRECTORY "${COG0_GENERATED_INCLUDE}/cog0")
 
 # All standalone headers now live directly in include/ as clean names.
 # (The former "(2)" duplicates have been consolidated into the clean files.)
+# Prefer symlinks; COPY_ON_ERROR covers Windows (no symlink privilege) and
+# filesystems that reject symlinks.
 foreach(_h
     AtomStore
     Logger
@@ -116,6 +118,7 @@ foreach(_h
         "${COG0_ROOT_INCLUDE_DIR}/${_h}.h"
         "${COG0_GENERATED_INCLUDE}/cog0/${_h}.h"
         SYMBOLIC
+        COPY_ON_ERROR
     )
 endforeach()
 
@@ -173,6 +176,8 @@ endif()
 option(USE_TLS "Enable TLS support for MonitoringServer (requires OpenSSL)" ON)
 
 set(COG0_BUILT_WITH_OPENSSL FALSE)
+set(COG0_PC_REQUIRES "")
+set(COG0_PC_LIBS_PRIVATE "")
 if(USE_TLS)
     find_package(OpenSSL QUIET)
     # FindOpenSSL sets OPENSSL_FOUND; some CMake versions also set OpenSSL_FOUND.
@@ -182,6 +187,8 @@ if(USE_TLS)
         # PUBLIC so installed Cog0::cog0lib exports the dependency for static linking.
         target_link_libraries(cog0lib PUBLIC OpenSSL::SSL OpenSSL::Crypto)
         set(COG0_BUILT_WITH_OPENSSL TRUE)
+        set(COG0_PC_REQUIRES "openssl")
+        set(COG0_PC_LIBS_PRIVATE "-lssl -lcrypto")
     else()
         message(STATUS "  OpenSSL: not found (TLS disabled; install libssl-dev to enable)")
     endif()
@@ -302,8 +309,9 @@ foreach(_h ${COG0_PUBLIC_HEADERS})
     endif()
 endforeach()
 
+# Runtime binary is installed but NOT exported — Development-only installs must
+# still provide a working find_package(Cog0) for Cog0::cog0lib.
 install(TARGETS cog0
-    EXPORT Cog0Targets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
             COMPONENT Runtime
 )

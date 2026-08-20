@@ -149,9 +149,10 @@ set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
 
 # Standalone runtime depends only on libc (+ optional openssl at link time).
+# Note: CPack does not expand debhelper substvars like ${binary:Version}.
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS "libc6")
 set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_DEPENDS
-    "${CPACK_DEBIAN_RUNTIME_PACKAGE_NAME} (= \${binary:Version})")
+    "${CPACK_DEBIAN_RUNTIME_PACKAGE_NAME} (= ${COGZERO_VERSION})")
 
 include(CPack)
 

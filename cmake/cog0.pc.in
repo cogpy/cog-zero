@@ -1,4 +1,5 @@
-prefix=@CMAKE_INSTALL_PREFIX@
+# Relocatable: pc lives in lib/pkgconfig (or lib64/pkgconfig) under the prefix.
+prefix=${pcfiledir}/../..
 exec_prefix=${prefix}
 libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
 includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
@@ -6,6 +7,6 @@ includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 Name: cog0
 Description: Standalone Agent-Zero C++ library (cog0lib)
 Version: @COGZERO_VERSION@
-Requires:
-Libs: -L${libdir} -lcog0
+Requires: @COG0_PC_REQUIRES@
+Libs: -L${libdir} -lcog0 @COG0_PC_LIBS_PRIVATE@
 Cflags: -I${includedir}

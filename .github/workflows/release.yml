@@ -61,20 +61,24 @@ jobs:
       matrix:
         include:
           - os: ubuntu-22.04
-            artifact_os: linux
+            artifact_os: linux-ubuntu22.04
             artifact_arch: x86_64
+            cpack_system: linux
             generator: Ninja
           - os: ubuntu-24.04
-            artifact_os: linux
+            artifact_os: linux-ubuntu24.04
             artifact_arch: x86_64
+            cpack_system: linux
             generator: Ninja
           - os: macos-14
             artifact_os: macos
             artifact_arch: arm64
+            cpack_system: macos
             generator: Ninja
           - os: windows-latest
             artifact_os: windows
             artifact_arch: x86_64
+            cpack_system: windows
             generator: Ninja
 
     steps:
@@ -126,6 +130,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          VER="${{ needs.validate-version.outputs.version }}"
+          OS_TAG="${{ matrix.artifact_os }}"
+          ARCH="${{ matrix.artifact_arch }}"
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             cpack --config build-rel/CPackConfig.cmake -G ZIP
           else
@@ -137,10 +144,21 @@ jobs:
           fi
           mkdir -p dist
           shopt -s nullglob
-          for f in build-rel/*.tar.gz build-rel/*.zip build-rel/*.deb; do
-            cp -v "$f" dist/
+          # Rename archives so multi-distro Linux jobs never collide on upload.
+          for f in build-rel/*.tar.gz; do
+            base="$(basename "$f")"
+            # Replace generic linux/macos/windows token with matrix artifact_os.
+            out="dist/cog0-${VER}-${OS_TAG}-${ARCH}.tar.gz"
+            cp -v "$f" "$out"
           done
-          # Normalize names if CPack used component suffixes
+          for f in build-rel/*.zip; do
+            out="dist/cog0-${VER}-${OS_TAG}-${ARCH}.zip"
+            cp -v "$f" "$out"
+          done
+          for f in build-rel/*.deb; do
+            bn="$(basename "$f" .deb)"
+            cp -v "$f" "dist/${bn}-${OS_TAG}.deb"
+          done
           ls -la dist/
 
       - name: Upload artifacts
