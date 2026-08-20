@@ -14,6 +14,9 @@ jobs:
   # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
   copilot-setup-steps:
     runs-on: ubuntu-latest
+    # Cap setup time so a stuck apt/network call cannot consume the full
+    # Copilot agent budget (max allowed by Copilot is 59).
+    timeout-minutes: 15
 
     # Minimal permissions needed for the setup steps only.
     # Copilot is given its own token for push/PR operations.
@@ -25,16 +28,100 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install C++ build dependencies
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            cmake \
-            ninja-build \
-            g++ \
-            libreadline-dev
+          set -euo pipefail
+
+          # Required for standalone cog0 builds (cmake + ninja + g++).
+          # libreadline-dev is optional for REPL tab-completion but cheap
+          # to install when missing.
+          packages=(cmake ninja-build g++ libreadline-dev)
+
+          # Prefer already-present tools. Many runners ship cmake/ninja under
+          # /usr/local even when the corresponding deb packages are absent.
+          tools_present=true
+          command -v cmake >/dev/null 2>&1 || tools_present=false
+          command -v ninja >/dev/null 2>&1 || tools_present=false
+          command -v g++ >/dev/null 2>&1 || tools_present=false
+
+          missing=()
+          if [ "$tools_present" = true ]; then
+            # Toolchain binaries exist; only pull missing deb deps (readline).
+            if ! dpkg -s libreadline-dev >/dev/null 2>&1; then
+              missing+=(libreadline-dev)
+            fi
+          else
+            for pkg in "${packages[@]}"; do
+              if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+                missing+=("$pkg")
+              fi
+            done
+          fi
+
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "All C++ build dependencies already present; skipping apt install"
+            exit 0
+          fi
+
+          echo "Installing missing packages: ${missing[*]}"
+
+          # unattended-upgrades often holds the dpkg lock on fresh runners.
+          # Wait briefly, then proceed (apt also gets DPkg::Lock::Timeout).
+          for i in $(seq 1 30); do
+            if sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+              || sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
+              echo "Waiting for apt/dpkg lock... ($i/30)"
+              sleep 2
+            else
+              break
+            fi
+          done
+
+          # Do not let apt hang for the full agent budget. On failure, continue
+          # so the verify step can still report what is available; Copilot can
+          # start with preinstalled tools if any remain.
+          set +e
+          sudo apt-get update -qq \
+            -o Acquire::Retries=3 \
+            -o DPkg::Lock::Timeout=60
+          update_rc=$?
+          if [ "$update_rc" -ne 0 ]; then
+            echo "::warning::apt-get update failed (exit $update_rc); skipping install"
+            exit 0
+          fi
+
+          if command -v timeout >/dev/null 2>&1; then
+            sudo timeout 8m apt-get install -y --no-install-recommends \
+              -o Acquire::Retries=3 \
+              -o DPkg::Lock::Timeout=60 \
+              "${missing[@]}"
+          else
+            sudo apt-get install -y --no-install-recommends \
+              -o Acquire::Retries=3 \
+              -o DPkg::Lock::Timeout=60 \
+              "${missing[@]}"
+          fi
+          install_rc=$?
+          set -e
+
+          if [ "$install_rc" -ne 0 ]; then
+            echo "::warning::apt-get install failed or timed out (exit $install_rc); relying on preinstalled toolchain"
+          fi
 
       - name: Verify build toolchain
         run: |
+          set -euo pipefail
+          echo "== cmake =="
           cmake --version
+          echo "== ninja =="
           ninja --version
+          echo "== g++ =="
           g++ --version
+          echo "== readline (optional) =="
+          if [ -f /usr/include/readline/readline.h ]; then
+            echo "readline headers: present"
+          else
+            echo "readline headers: absent (REPL tab-completion will be disabled)"
+          fi
