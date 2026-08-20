@@ -1,9 +1,10 @@
 @PACKAGE_INIT@
 
-# Standalone cog0 CMake package (Runtime + Development components).
+# Standalone cog0 CMake package (Development component).
 # Imported targets:
-#   Cog0::cog0lib  — static library
-#   Cog0::cog0     — executable (optional; may be absent in SDK-only installs)
+#   Cog0::cog0lib  — static library (headers under include/cog0/)
+# The cog0 runtime executable is installed with the Runtime component but is
+# not part of this export set (so Development-only installs work).
 
 set(COG0_VERSION "@COGZERO_VERSION@")
 set(COG0_BUILT_WITH_OPENSSL "@COG0_BUILT_WITH_OPENSSL@")
