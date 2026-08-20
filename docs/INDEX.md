@@ -72,8 +72,9 @@ Welcome to the comprehensive documentation for Agent-Zero's C++ implementation i
 **For Operators:**
 1. [Production Deployment (Phase 14)](PRODUCTION_DEPLOYMENT.md)
 2. [Deployment Guide](DEPLOYMENT_GUIDE.md)
-3. [Configuration Reference](CONFIGURATION.md)
-4. [Troubleshooting Guide](TROUBLESHOOTING.md)
+3. [Packaging](PACKAGING.md) / [Release runbook](RELEASE.md)
+4. [Configuration Reference](CONFIGURATION.md)
+5. [Troubleshooting Guide](TROUBLESHOOTING.md)
 
 ### By Task
 

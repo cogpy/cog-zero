@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Python packaging smoke (`scripts/python_packaging_smoke.sh`) and CI job
+  building sdist + pure-Python wheel with import/version checks.
+- Release workflow attaches Python sdist/wheel artifacts alongside native
+  archives (RT3 MVP).
+- Packaging smoke verifies Linux DEB packages via `dpkg-deb -x` and
+  `cog0 --version`.
+- ROADMAP Phase 15 documents packaging & release targets.
+
 ## [0.3.0] - 2026-08-20
 
 ### Added

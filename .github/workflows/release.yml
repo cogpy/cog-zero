@@ -168,9 +168,38 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  python-artifacts:
+    name: Python sdist + wheel (RT3 MVP)
+    needs: validate-version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and smoke-test Python package
+        run: |
+          set -euo pipefail
+          chmod +x scripts/python_packaging_smoke.sh
+          ./scripts/python_packaging_smoke.sh
+          mkdir -p dist-python
+          cp -v build-python-packaging-smoke/dist/cog0-*.whl \
+                build-python-packaging-smoke/dist/cog0-*.tar.gz \
+                dist-python/
+
+      - name: Upload Python artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cog0-${{ needs.validate-version.outputs.version }}-python
+          path: dist-python/*
+          if-no-files-found: error
+
   checksums-and-release:
     name: Checksums & GitHub Release
-    needs: [validate-version, build-artifacts]
+    needs: [validate-version, build-artifacts, python-artifacts]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -187,7 +216,25 @@ jobs:
         run: |
           set -euo pipefail
           ls -la
-          sha256sum * > SHA256SUMS
+          # merge-multiple:true should already flatten; if nested dirs remain,
+          # move files up but fail hard on basename collisions.
+          while IFS= read -r -d '' f; do
+            base="$(basename "$f")"
+            if [[ -e "./${base}" ]]; then
+              echo "ERROR: release asset name collision for '${base}'" >&2
+              echo "  existing path: ./${base}" >&2
+              ls -la "./${base}" >&2 || true
+              echo "  nested path:   ${f}" >&2
+              exit 1
+            fi
+            mv -v "$f" "./${base}"
+          done < <(find . -mindepth 2 -type f -print0)
+          find . -type d -empty -delete 2>/dev/null || true
+          ls -la
+          shopt -s nullglob
+          files=( * )
+          test "${#files[@]}" -ge 1 || { echo "ERROR: no release assets" >&2; exit 1; }
+          sha256sum "${files[@]}" > SHA256SUMS
           cat SHA256SUMS
 
       - name: Extract CHANGELOG section
@@ -210,7 +257,7 @@ jobs:
           print(f"## cog0 v{ver}\n")
           print(body)
           print("\n### Artifacts\n")
-          print("See attached archives and `SHA256SUMS`. License: AGPL-3.0.")
+          print("See attached archives, Python sdist/wheel, and `SHA256SUMS`. License: AGPL-3.0.")
           PY
 
       - name: Publish GitHub Release

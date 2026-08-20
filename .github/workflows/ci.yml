@@ -208,3 +208,30 @@ jobs:
             build-packaging-smoke/*.deb
           if-no-files-found: warn
           retention-days: 7
+
+  python-packaging-smoke:
+    name: Python packaging smoke (sdist + wheel)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run Python packaging smoke
+        run: |
+          chmod +x scripts/python_packaging_smoke.sh
+          ./scripts/python_packaging_smoke.sh
+
+      - name: Upload Python artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cog0-python-packaging-smoke
+          path: |
+            build-python-packaging-smoke/dist/*.whl
+            build-python-packaging-smoke/dist/*.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
