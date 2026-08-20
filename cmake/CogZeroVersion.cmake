@@ -4,7 +4,7 @@
 # Reads the top-level VERSION file (or falls back to git describe / default).
 #
 # Sets:
-#   COGZERO_VERSION          full version string (e.g. 0.3.0)
+#   COGZERO_VERSION          full version string (e.g. 3.1.0)
 #   COGZERO_VERSION_MAJOR
 #   COGZERO_VERSION_MINOR
 #   COGZERO_VERSION_PATCH
@@ -35,7 +35,7 @@ else()
         file(READ "${_cogzero_version_file}" _cogzero_version_raw)
         string(STRIP "${_cogzero_version_raw}" COGZERO_VERSION)
     else()
-        set(COGZERO_VERSION "0.3.0")
+        set(COGZERO_VERSION "3.1.0")
         message(STATUS "CogZeroVersion: VERSION file not found; defaulting to ${COGZERO_VERSION}")
     endif()
 endif()

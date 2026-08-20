@@ -1,6 +1,6 @@
 # cog0 Deployment Guide
 
-*cog0 standalone — v0.3.0*
+*cog0 standalone — v3.1.0*
 
 ---
 

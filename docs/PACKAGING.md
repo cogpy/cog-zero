@@ -50,9 +50,9 @@ cpack --config build-rel/CPackConfig.cmake -G TGZ
 Archive names look like:
 
 ```text
-cog0-0.3.0-linux-x86_64.tar.gz
-cog0-0.3.0-macos-arm64.tar.gz
-cog0-0.3.0-windows-x86_64.zip
+cog0-3.1.0-linux-x86_64.tar.gz
+cog0-3.1.0-macos-arm64.tar.gz
+cog0-3.1.0-windows-x86_64.zip
 ```
 
 ## Packaging smoke test

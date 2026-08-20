@@ -78,7 +78,7 @@ CliArgs parseArgs(int argc, char** argv) {
         } else if (arg == "--version" || arg == "-V") {
             // COG0_VERSION is injected by CMake from the top-level VERSION file.
 #ifndef COG0_VERSION
-#define COG0_VERSION "0.3.0"
+#define COG0_VERSION "3.1.0"
 #endif
             std::cout << "cog0 " << COG0_VERSION << "\n";
             std::exit(0);
