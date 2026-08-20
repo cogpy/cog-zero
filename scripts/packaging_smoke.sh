@@ -90,16 +90,17 @@ if [[ "$(uname -s)" == "Linux" ]]; then
     cd "${BUILD_DIR}"
     cpack --config "${BUILD_DIR}/CPackConfig.cmake" -G DEB
   )
+  # Ensure unmatched globs expand empty even if nullglob was unset earlier.
+  shopt -s nullglob
   DEBS=( "${BUILD_DIR}"/cog0_*.deb "${BUILD_DIR}"/cog0-*.deb )
-  # Prefer the runtime package (not -dev)
+  # Prefer the runtime package (not -dev / not python)
   RUNTIME_DEB=""
   for d in "${DEBS[@]}"; do
+    [[ -f "${d}" ]] || continue
     bn="$(basename "${d}")"
-    if [[ "${bn}" == cog0_*_*.deb || "${bn}" == cog0-*.deb ]]; then
-      if [[ "${bn}" != *dev* && "${bn}" != *python* ]]; then
-        RUNTIME_DEB="${d}"
-        break
-      fi
+    if [[ "${bn}" != *dev* && "${bn}" != *python* ]]; then
+      RUNTIME_DEB="${d}"
+      break
     fi
   done
   if [[ -z "${RUNTIME_DEB}" && ${#DEBS[@]} -ge 1 ]]; then

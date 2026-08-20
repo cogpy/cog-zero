@@ -216,11 +216,24 @@ jobs:
         run: |
           set -euo pipefail
           ls -la
-          # Flatten one level if download-artifact nested by name
-          find . -mindepth 2 -type f -exec mv -t . {} + 2>/dev/null || true
+          # merge-multiple:true should already flatten; if nested dirs remain,
+          # move files up but fail hard on basename collisions.
+          while IFS= read -r -d '' f; do
+            base="$(basename "$f")"
+            if [[ -e "./${base}" ]]; then
+              echo "ERROR: release asset name collision for '${base}'" >&2
+              echo "  existing: ./$(ls -la "./${base}")" >&2
+              echo "  nested:   ${f}" >&2
+              exit 1
+            fi
+            mv -v "$f" "./${base}"
+          done < <(find . -mindepth 2 -type f -print0)
           find . -type d -empty -delete 2>/dev/null || true
           ls -la
-          sha256sum * > SHA256SUMS
+          shopt -s nullglob
+          files=( * )
+          test "${#files[@]}" -ge 1 || { echo "ERROR: no release assets" >&2; exit 1; }
+          sha256sum "${files[@]}" > SHA256SUMS
           cat SHA256SUMS
 
       - name: Extract CHANGELOG section
