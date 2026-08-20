@@ -108,7 +108,7 @@ if [[ "$(uname -s)" == "Linux" ]]; then
   fi
   test -n "${RUNTIME_DEB}" -a -f "${RUNTIME_DEB}" || {
     echo "ERROR: no DEB produced in ${BUILD_DIR}" >&2
-    ls -la "${BUILD_DIR}"/*.deb 2>/dev/null || ls -la "${BUILD_DIR}" >&2
+    ls -la "${BUILD_DIR}" >&2 || true
     exit 1
   }
   echo "    deb: ${RUNTIME_DEB}"

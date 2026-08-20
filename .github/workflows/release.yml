@@ -222,8 +222,9 @@ jobs:
             base="$(basename "$f")"
             if [[ -e "./${base}" ]]; then
               echo "ERROR: release asset name collision for '${base}'" >&2
-              echo "  existing: ./$(ls -la "./${base}")" >&2
-              echo "  nested:   ${f}" >&2
+              echo "  existing path: ./${base}" >&2
+              ls -la "./${base}" >&2 || true
+              echo "  nested path:   ${f}" >&2
               exit 1
             fi
             mv -v "$f" "./${base}"
