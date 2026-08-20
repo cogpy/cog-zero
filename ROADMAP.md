@@ -326,9 +326,11 @@ container images, Python MVP packaging, and tag-driven GitHub Releases.
 
 | Version | Highlights |
 |---------|-----------|
+| **3.1.0** | Product release tag `v3.1.0`: Phase 13 + Phase 15 packaging (`VERSION`/CPack/install components, release + Docker workflows, Python wheel MVP). Matches top-level `VERSION`. |
+| **3.0.0** | Product release tag `v3.0.0`: modular agentzero stack through Phase 14 hardening and multi-OS CI. |
 | **0.5.0** | Phase 14: Agent migration (`serialize`/`deserialize`); WebSocket dashboard (`/dashboard`); pluggable `RaftLogStore`; AgentService gRPC/JSON API; MonitoringServer TLS; `ToolWrapper` REST/Python/Shell; `MessageSerializer` JSON parser; 230+ tests (14 CTest targets) |
 | **0.4.0** | Phase 12: `RaftConsensus` (Raft leader election, pure C++17); `ConflictResolver` (STRICT_PRIORITY / FAIRNESS_WEIGHTED / SLA_PRIORITY); `MonitoringServer` (HTTP /health /metrics /atoms /attention); `Logger` JSON-lines structured logging; 161 tests (7 CTest targets); CTest discoverable from root build dir |
-| **3.1.0** | Phase 13 + Phase 15 packaging: `cog0` agent definition; CMake graceful fallback; CTest labels; CI; unified `VERSION`/CPack/install components; release + Docker workflows; Python wheel MVP |
+| **0.3.0** | Phase 13 packaging groundwork (superseded as product version by **3.1.0**): `cog0` agent definition; CMake graceful fallback; CTest labels; CI |
 | **0.2.0** | Phases 4–7 (Planning, Learning, Communication, Memory) marked complete; Phase 11 (Profiling) implemented; `goals` and `infer` REPL commands; Phase 12 roadmap defined; 147 tests |
 | **0.1.3** | Phase 2 Perception: `MultiModalSensor`, `PerceptualProcessor`, `AttentionManager`, `TextualSensor` — 36 new tests (143 total); CI workflow complete |
 | **0.1.2** | ANSI colour output with `--no-color` toggle; readline tab-completion (optional); ROADMAP near-term enhancements complete |
