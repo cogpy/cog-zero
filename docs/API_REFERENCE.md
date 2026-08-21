@@ -699,7 +699,7 @@ export PYTHONPATH=$PWD/agentzero-python-bridge:$PYTHONPATH
 ```python
 from cog0 import Agent, version
 
-print(version())  # e.g. "0.3.0"
+print(version())  # e.g. "3.1.0"
 
 with Agent(name="demo", cycle_interval_ms=10, max_tasks_per_cycle=8) as agent:
     agent.set_goal("explore", "Explore the environment", priority=0.9)

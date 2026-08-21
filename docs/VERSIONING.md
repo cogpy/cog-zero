@@ -37,7 +37,7 @@ Package version files use `COMPATIBILITY SameMajorVersion`.
 
 ## Release tags
 
-- Git tags: `vMAJOR.MINOR.PATCH` (example: `v0.3.0`).
+- Git tags: `vMAJOR.MINOR.PATCH` (example: `v3.1.0`).
 - The release workflow fails if the tag version does not match `VERSION` or if
   `CHANGELOG.md` lacks a `## [X.Y.Z]` section.
 - Pre-releases may use a hyphenated version only after the version scheme is

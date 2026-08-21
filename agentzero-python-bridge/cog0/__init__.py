@@ -33,7 +33,7 @@ except Exception:
             candidate = parent / "VERSION"
             if candidate.is_file():
                 return candidate.read_text(encoding="utf-8").strip()
-        return "0.3.0"
+        return "3.1.0"
 
     __version__ = _read_repo_version()
 
